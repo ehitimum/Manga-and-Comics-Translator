@@ -1,0 +1,50 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Cal Sans", "IBM Plex Sans", system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-bg: oklch(15% 0.01 270);
+  --color-panel: oklch(20% 0.012 270);
+  --color-panel-2: oklch(24% 0.014 270);
+  --color-border: oklch(28% 0.014 270);
+  --color-text: oklch(96% 0.005 270);
+  --color-muted: oklch(70% 0.015 270);
+  --color-accent: oklch(63% 0.18 265);
+  --color-accent-hover: oklch(58% 0.19 265);
+  --color-success: oklch(70% 0.17 150);
+  --color-warn: oklch(75% 0.16 80);
+  --color-danger: oklch(63% 0.22 25);
+}
+
+@font-face {
+  font-family: "Cal Sans";
+  src: url("https://cdn.jsdelivr.net/gh/calcom/font/fonts/webfonts/CalSans-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+html, body, #root {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 20% -10%, oklch(28% 0.08 265 / 0.4), transparent 50%),
+    radial-gradient(circle at 110% 10%, oklch(28% 0.08 280 / 0.3), transparent 45%),
+    var(--color-bg);
+  background-attachment: fixed;
+}
+
+::selection { background: oklch(63% 0.18 265 / 0.45); }
+
+input, button, select, textarea { font-family: inherit; }

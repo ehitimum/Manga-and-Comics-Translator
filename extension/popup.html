@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Manga Translator Pro</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --panel: #1e293b;
+        --text: #f1f5f9;
+        --muted: #94a3b8;
+        --accent: #2563eb;
+        --accent-hover: #1d4ed8;
+        --success: #16a34a;
+        --warn: #d97706;
+        --danger: #dc2626;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        width: 320px;
+      }
+      .wrap { padding: 16px; }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      header img { width: 28px; height: 28px; }
+      header h1 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+      header .sub {
+        margin: 0;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--panel);
+        padding: 8px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        margin-bottom: 12px;
+      }
+      .status .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+      .status[data-state="ok"] .dot { background: var(--success); }
+      .status[data-state="warn"] .dot { background: var(--warn); }
+      .status[data-state="err"] .dot { background: var(--danger); }
+      .row { display: flex; gap: 8px; margin-bottom: 8px; }
+      button {
+        flex: 1;
+        padding: 10px 12px;
+        background: var(--accent);
+        color: #fff;
+        border: 0;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      button:hover { background: var(--accent-hover); }
+      button:disabled { opacity: 0.6; cursor: progress; }
+      button.secondary {
+        background: transparent;
+        border: 1px solid var(--panel);
+        color: var(--text);
+      }
+      button.secondary:hover { background: var(--panel); }
+      label.toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 8px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .hint {
+        margin-top: 10px;
+        padding: 8px 10px;
+        background: var(--panel);
+        border-radius: 6px;
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      .hint code {
+        font-family: ui-monospace, monospace;
+        background: #0b1220;
+        padding: 1px 4px;
+        border-radius: 3px;
+        color: #e2e8f0;
+      }
+      footer {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid #1e293b;
+        font-size: 11px;
+        color: var(--muted);
+        display: flex;
+        justify-content: space-between;
+      }
+      footer a { color: var(--muted); text-decoration: none; }
+      footer a:hover { color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <img src="icons/icon48.png" alt="" />
+        <div>
+          <h1>Manga Translator Pro</h1>
+          <p class="sub" id="provider-label">…</p>
+        </div>
+      </header>
+
+      <div class="status" id="status" data-state="">
+        <span class="dot"></span>
+        <span id="status-text">Checking provider…</span>
+      </div>
+
+      <div class="row">
+        <button id="translate-btn">Translate page</button>
+      </div>
+
+      <label class="toggle">
+        <input type="checkbox" id="auto-mode" />
+        Auto-translate on scroll
+      </label>
+
+      <div class="hint" id="hint">
+        Make sure your provider is running (see Options).
+      </div>
+
+      <footer>
+        <a href="#" id="open-options">Settings →</a>
+        <span>v0.2.0</span>
+      </footer>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

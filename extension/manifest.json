@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Manga Translator Pro",
+  "version": "0.2.0",
+  "description": "Translate Japanese manga panels into English on the page, powered by local Ollama or a self-hosted server.",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "optional_host_permissions": ["*://*/*"],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://mangadex.org/*",
+    "https://*.mangadex.org/*",
+    "https://rawkuma.com/*",
+    "https://*.rawkuma.com/*",
+    "https://syosetu.com/*",
+    "https://*.syosetu.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Manga Translator Pro",
+    "default_icon": {"16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png"}
+  },
+  "icons": {"16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png"},
+  "options_page": "options/index.html",
+  "background": {"service_worker": "background.js", "type": "module"},
+  "web_accessible_resources": [{"resources": ["icons/*"], "matches": ["<all_urls>"]}]
+}
