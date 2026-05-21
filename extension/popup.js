@@ -7,11 +7,24 @@ const autoModeToggle = document.getElementById('auto-mode');
 const providerLabel = document.getElementById('provider-label');
 const hint = document.getElementById('hint');
 const openOptions = document.getElementById('open-options');
+const buildLabel = document.getElementById('build-label');
 
 const PROVIDER_LABELS = {
   ollama: 'Ollama (local)',
   local: 'Local FastAPI server',
+  gemini: 'Gemini API (cloud)',
 };
+
+async function loadBuildInfo() {
+  try {
+    const res = await fetch(chrome.runtime.getURL('build-info.json'));
+    const info = await res.json();
+    buildLabel.textContent = `v${info.version} · ${info.buildId}`;
+    buildLabel.title = `Built ${info.buildTime}`;
+  } catch {
+    buildLabel.textContent = 'v?';
+  }
+}
 
 function setStatus(state, text) {
   statusEl.dataset.state = state;
@@ -19,7 +32,7 @@ function setStatus(state, text) {
 }
 
 async function loadSettingsAndProbe() {
-  const { provider = 'ollama', autoMode = false } = await chrome.storage.local.get([
+  const { provider = 'gemini', autoMode = false } = await chrome.storage.local.get([
     'provider', 'autoMode',
   ]);
   providerLabel.textContent = PROVIDER_LABELS[provider] || provider;
@@ -30,9 +43,13 @@ async function loadSettingsAndProbe() {
   chrome.runtime.sendMessage({ action: 'test_connection', provider }, (res) => {
     if (!res || res.error || !res.ok) {
       setStatus('err', res?.error || res?.message || 'Provider unreachable');
-      hint.innerHTML = provider === 'ollama'
-        ? `Start Ollama: <code>ollama serve</code><br/>Then pull a vision model: <code>ollama pull qwen2.5vl:7b</code>`
-        : `Start the local server: <code>cd server && uvicorn app:app --port 8000</code>`;
+      if (provider === 'ollama') {
+        hint.innerHTML = `Start Ollama: <code>ollama serve</code><br/>Then pull a vision model: <code>ollama pull qwen2.5vl:7b</code>`;
+      } else if (provider === 'local') {
+        hint.innerHTML = `Start the local server: <code>cd server && uvicorn app:app --port 8001</code>`;
+      } else if (provider === 'gemini') {
+        hint.innerHTML = `Add your Gemini API key in Options. Get a free one at <code>aistudio.google.com/apikey</code>.`;
+      }
       return;
     }
     if (provider === 'ollama' && !res.modelInstalled) {
@@ -83,4 +100,5 @@ openOptions.addEventListener('click', (e) => {
   chrome.runtime.openOptionsPage();
 });
 
+loadBuildInfo();
 loadSettingsAndProbe();

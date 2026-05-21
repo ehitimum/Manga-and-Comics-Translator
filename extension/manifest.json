@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Manga Translator Pro",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Translate Japanese manga panels into English on the page, powered by local Ollama or a self-hosted server.",
   "permissions": ["activeTab", "storage", "scripting"],
   "optional_host_permissions": ["*://*/*"],

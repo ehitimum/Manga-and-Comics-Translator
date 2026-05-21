@@ -21,7 +21,7 @@ const DEFAULT_SETTINGS = {
   ollamaModel: 'moondream:latest',          // small vision model (~1.7GB). qwen2.5vl:7b is better but RAM-heavy.
   localServerUrl: 'http://localhost:8001',  // matches `python app.py` default
   geminiApiKey: '',                         // free key at aistudio.google.com/apikey
-  geminiModel: 'gemini-2.0-flash',
+  geminiModel: 'gemini-2.5-flash',          // Dev default. For production: switch to gemini-2.5-pro (better spatial reasoning, requires Pro billing).
   autoMode: false,
 };
 
@@ -78,17 +78,23 @@ async function handleCaptureAndTranslate(sender, sendResponse) {
   }
 }
 
-async function callProviderWithRetry(settings, base64Image, maxAttempts = 2) {
+async function callProviderWithRetry(settings, base64Image, maxAttempts = 3) {
   let lastErr;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await callProvider(settings, base64Image);
     } catch (err) {
       lastErr = err;
-      const transient = /timeout|network|fetch|JSON/i.test(err.message || '');
+      const msg = err.message || '';
+      // Don't retry on timeout — the caller already waited 90s, doubling the wait helps no one.
+      const isTimeout = /timed out|abort/i.test(msg);
+      // 503 (overloaded), 429 (rate limit), and network/JSON glitches are worth retrying with backoff.
+      const isServerBusy = /\b(503|429)\b/.test(msg);
+      const transient = !isTimeout && (isServerBusy || /network|fetch|JSON/i.test(msg));
       if (!transient || attempt === maxAttempts) throw err;
-      console.warn(`[MangaTranslator] attempt ${attempt} failed, retrying:`, err.message);
-      await sleep(500 * attempt);
+      const backoffMs = isServerBusy ? 2000 * attempt : 500 * attempt;
+      console.warn(`[MangaTranslator] attempt ${attempt} failed, retrying in ${backoffMs}ms:`, msg);
+      await sleep(backoffMs);
     }
   }
   throw lastErr;

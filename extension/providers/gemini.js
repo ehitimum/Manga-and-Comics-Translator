@@ -27,7 +27,14 @@ Output strict JSON only — an array of objects with this exact schema:
   {"box_2d": [ymin, xmin, ymax, xmax], "text": "<english translation>"}
 ]
 
-box_2d coordinates are normalized to the range [0, 1000] relative to the image dimensions, in [ymin, xmin, ymax, xmax] order.
+CRITICAL — bounding box accuracy:
+  - box_2d uses [ymin, xmin, ymax, xmax] order, normalized to [0, 1000] relative to the full image.
+  - The four numbers MUST tightly enclose the actual Japanese text in the image.
+  - The image may have wide dark or empty margins on the left and/or right where the manga page is centered. NEVER place a bounding box inside an empty/dark margin — find the actual text pixels and put the box on them.
+  - Before outputting, sanity-check each box: imagine drawing a rectangle at [xmin, ymin]–[xmax, ymax] on the image. The Japanese characters MUST be visible inside that rectangle. If the rectangle is mostly empty or dark, your coordinates are wrong.
+  - Verify left/right placement: text on the right half of the image MUST have xmin > 500. Text on the left half MUST have xmax < 500. Centered text spans across 500.
+  - Verify top/bottom placement: text in the bottom half MUST have ymin > 500. Text in the top half MUST have ymax < 500.
+  - Do not output a box if you are unsure of its exact location — accuracy matters more than recall.
 
 Rules:
   - Return ONLY the JSON array, no prose, no markdown, no code fences.
@@ -35,6 +42,8 @@ Rules:
   - Keep onomatopoeia / sound effects short (e.g. "BANG!", "thud", "sigh").
   - If no Japanese text is visible, return: []
   - Do NOT include English text that is already English.`;
+
+const REQUEST_TIMEOUT_MS = 90_000;
 
 export async function translateWithGemini(base64Image, settings) {
   const apiKey = (settings.geminiApiKey || '').trim();
@@ -44,24 +53,38 @@ export async function translateWithGemini(base64Image, settings) {
   const model = settings.geminiModel || 'gemini-2.0-flash';
   const url = `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            { inline_data: { mime_type: 'image/png', data: base64Image } },
-            { text: PROMPT },
-          ],
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { inline_data: { mime_type: 'image/png', data: base64Image } },
+              { text: PROMPT },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.2,
+          responseMimeType: 'application/json',
         },
-      ],
-      generationConfig: {
-        temperature: 0.2,
-        responseMimeType: 'application/json',
-      },
-    }),
-  });
+      }),
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Gemini request timed out after ${REQUEST_TIMEOUT_MS / 1000}s. Try a smaller / different model or check your connection.`);
+    }
+    throw new Error(`Gemini network error: ${err.message || err}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errText = await response.text().catch(() => '');
@@ -81,7 +104,10 @@ export async function translateWithGemini(base64Image, settings) {
   if (!imgW || !imgH) {
     throw new Error('Could not read PNG dimensions from captured tab image.');
   }
-  return parseGeminiBoxes(text, imgW, imgH);
+  console.log(`[MangaTranslator] Gemini image ${imgW}x${imgH}, raw response:`, text);
+  const boxes = parseGeminiBoxes(text, imgW, imgH);
+  console.log('[MangaTranslator] Gemini boxes (PNG pixels):', boxes);
+  return boxes;
 }
 
 export function parseGeminiBoxes(raw, imgW, imgH) {

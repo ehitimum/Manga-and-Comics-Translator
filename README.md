@@ -55,6 +55,8 @@ Supports three translation providers: **Gemini API** (cloud, free, recommended),
 1. Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and sign in with a Google account.
 2. Click **Create API key** → select **Default Gemini Project** → copy the key.
 
+> **Which model?** The default is `gemini-2.5-flash` — good accuracy, generous free quota. For production / highest accuracy on pages with dark margins, switch to `gemini-2.5-pro` in the options dropdown (requires Pro billing enabled in your Google Cloud project — Pro is not on the free tier).
+
 **2. Build and load the extension**
 
 ```bash

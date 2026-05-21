@@ -22,13 +22,16 @@ export interface ConnectionTestResult {
   details?: Record<string, unknown>;
 }
 
+// Default model: gemini-2.5-flash gives good accuracy with paid free-tier quota.
+// For production / max accuracy, switch to gemini-2.5-pro in the options dropdown
+// (requires paid quota enabled for Pro in your Google Cloud billing project).
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'gemini',
   ollamaUrl: 'http://localhost:11434',
   ollamaModel: 'moondream:latest',
   localServerUrl: 'http://localhost:8001',
   geminiApiKey: '',
-  geminiModel: 'gemini-2.0-flash',
+  geminiModel: 'gemini-2.5-flash',
   autoMode: false,
 };
 
@@ -41,8 +44,10 @@ export const RECOMMENDED_OLLAMA_MODELS = [
 ];
 
 export const RECOMMENDED_GEMINI_MODELS = [
-  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', note: 'Default. Best balance of accuracy + speed. Free 1500 req/day.' },
-  { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite', note: 'Faster, slightly weaker on Japanese.' },
-  { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', note: 'Older, still solid on Japanese.' },
-  { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', note: 'Highest accuracy, lower free quota.' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', note: 'Best overall. Fastest + strongest Japanese OCR. Paid tier.' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', note: 'Highest accuracy, slower. Paid tier.' },
+  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', note: 'Recommended for free tier. 1500 req/day.' },
+  { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite', note: 'Fastest, slightly weaker on Japanese.' },
+  { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', note: 'Older, free tier fallback.' },
+  { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', note: 'Older, highest accuracy, lower free quota.' },
 ];

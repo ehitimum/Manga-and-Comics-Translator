@@ -1,10 +1,11 @@
 {
   "name": "manga-translator-pro",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
+    "prebuild": "node scripts/gen-build-info.cjs",
     "build": "vite build",
     "build:watch": "vite build --watch",
     "preview": "vite preview",

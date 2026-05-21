@@ -71,22 +71,25 @@
       .mtp-overlay {
         position: absolute;
         z-index: 2147483645;
-        background: rgba(255, 255, 255, 0.96);
+        background: #ffffff;
         color: #0f172a;
-        border: 2px solid #0f172a;
-        border-radius: 6px;
-        padding: 6px 8px;
+        border: 1.5px solid rgba(0, 0, 0, 0.55);
+        border-radius: 50% / 40%;
+        padding: 8px 10px;
         font-family: 'Wild Words', 'Comic Sans MS', system-ui, sans-serif;
-        font-weight: 600;
+        font-weight: 700;
+        font-size: 13px;
         text-align: center;
-        line-height: 1.15;
+        line-height: 1.2;
         word-wrap: break-word;
         overflow: hidden;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
         pointer-events: auto;
         cursor: text;
       }
-      .mtp-overlay:hover { background: rgba(255, 255, 255, 1); }
 
       #mtp-toast {
         position: fixed;
@@ -135,9 +138,21 @@
     }, durationMs);
   }
 
+  let busyTimer = null;
   function setBusy(busy, label = null) {
     btn.dataset.busy = busy ? 'true' : 'false';
-    btn.querySelector('.mtp-label').textContent = label || (busy ? 'Translating…' : 'Translate');
+    const labelEl = btn.querySelector('.mtp-label');
+    if (busyTimer) { clearInterval(busyTimer); busyTimer = null; }
+    if (busy) {
+      const startedAt = Date.now();
+      labelEl.textContent = label || 'Translating… 0s';
+      busyTimer = setInterval(() => {
+        const sec = Math.floor((Date.now() - startedAt) / 1000);
+        labelEl.textContent = `Translating… ${sec}s`;
+      }, 1000);
+    } else {
+      labelEl.textContent = label || 'Translate';
+    }
   }
 
   function setError(msg) {
@@ -232,17 +247,19 @@
       const cssWidth = item.w / dpr;
       const cssHeight = item.h / dpr;
 
-      // Skip bogus boxes (sometimes models hallucinate 0x0, or detectors return
-      // a full-page box). A real manga bubble is at most ~60% of the viewport
-      // in either dimension; anything bigger is almost certainly junk.
+      // Skip bogus boxes. Two failure modes to reject:
+      //   1. Tiny / zero-size boxes (model hallucination).
+      //   2. Full-image fallback boxes — both width AND height huge.
+      // Long vertical recap columns are tall but very narrow, so we use AND
+      // (not OR) on the dimension check to let them through.
       if (cssWidth < 8 || cssHeight < 8) continue;
-      if (cssWidth > window.innerWidth * 0.6 || cssHeight > window.innerHeight * 0.6) {
-        console.warn('[MangaTranslator] skipping oversized overlay', cssWidth, cssHeight);
+      if (cssWidth > window.innerWidth * 0.7 && cssHeight > window.innerHeight * 0.7) {
+        console.warn('[MangaTranslator] skipping full-page overlay', cssWidth, cssHeight);
         continue;
       }
       const viewportArea = window.innerWidth * window.innerHeight;
-      if (cssWidth * cssHeight > viewportArea * 0.25) {
-        console.warn('[MangaTranslator] skipping overlay covering >25% of viewport');
+      if (cssWidth * cssHeight > viewportArea * 0.4) {
+        console.warn('[MangaTranslator] skipping overlay covering >40% of viewport');
         continue;
       }
 
@@ -252,7 +269,7 @@
       el.style.left = `${cssLeft}px`;
       el.style.top = `${cssTop}px`;
       el.style.width = `${cssWidth}px`;
-      el.style.minHeight = `${cssHeight}px`;
+      el.style.height = `${cssHeight}px`;
       el.style.fontSize = `${computeFontSize(cssWidth, cssHeight, item.text)}px`;
       el.title = item.text; // tooltip for long text
       document.body.appendChild(el);
@@ -294,5 +311,15 @@
     }
   });
 
-  console.log('[MangaTranslator] content script ready');
+  // Log build info so the user can verify from DevTools which build is running
+  fetch(chrome.runtime.getURL('build-info.json'))
+    .then((r) => r.json())
+    .then((info) => {
+      console.log(
+        `%c[MangaTranslator] content script ready · v${info.version} · build ${info.buildId}`,
+        'color:#2563eb;font-weight:bold',
+      );
+      btn.title = `Manga Translator Pro v${info.version}\nBuild: ${info.buildId}`;
+    })
+    .catch(() => console.log('[MangaTranslator] content script ready (build-info unavailable)'));
 })();
