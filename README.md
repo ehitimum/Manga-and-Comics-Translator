@@ -2,94 +2,150 @@
 
 A Chrome extension that translates Japanese manga into English in-place on any web page. Works on MangaDex, raw Japanese aggregator sites, and anywhere manga is rendered as images.
 
-**Phase 1 status**: working end-to-end with local Ollama. Hosted/paid providers coming in Phase 2.
+Supports three translation providers: **Gemini API** (cloud, free, recommended), **Ollama** (local, offline), and a **Local FastAPI server** (specialist manga-OCR pipeline).
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────┐         ┌──────────────────────────┐
-│  Chrome Extension   │         │  Provider (your choice)  │
-│                     │         │                          │
-│  popup.html ─────┐  │         │  Option A: Ollama        │
-│  background.js ──┼──┼────────►│    qwen2.5vl:7b          │
-│  content.js   ◄──┘  │         │    (one-shot vision)     │
-│  options/ (React)   │         │                          │
-└─────────────────────┘         │  Option B: FastAPI       │
-                                │    + manga-ocr           │
-                                │    + Ollama (text trans) │
-                                └──────────────────────────┘
+┌─────────────────────┐         ┌──────────────────────────────┐
+│  Chrome Extension   │         │  Provider (your choice)      │
+│                     │         │                              │
+│  popup.html ─────┐  │         │  Option A: Gemini API        │
+│  background.js ──┼──┼────────►│    gemini-2.0-flash          │
+│  content.js   ◄──┘  │         │    (cloud, free tier)        │
+│  options/ (React)   │         │                              │
+└─────────────────────┘         │  Option B: Ollama            │
+                                │    qwen2.5vl:7b              │
+                                │    (one-shot local vision)   │
+                                │                              │
+                                │  Option C: FastAPI           │
+                                │    + manga-ocr               │
+                                │    + Ollama (text trans)     │
+                                └──────────────────────────────┘
 ```
 
-**Two-tier provider model**:
-- **Ollama (default)**: one vision model handles detect + OCR + translate. Faster setup.
-- **Local FastAPI Server**: specialized manga-OCR + a separate translation step. Higher quality.
+**Three provider options:**
+
+| Provider | Setup | Privacy | Cost |
+|---|---|---|---|
+| **Gemini API** (default) | Paste a free API key | Sends images to Google | Free ~1500 req/day |
+| **Ollama** | Install + pull model | Fully local | Free, needs ~6GB RAM |
+| **Local Server** | Python + Ollama | Fully local | Free, best OCR quality |
 
 ---
 
 ## Prerequisites
 
 - Node.js 20+
-- Python 3.10+
-- [Ollama](https://ollama.com/download) installed locally
 - Chrome / Chromium / Edge / Brave (any Chromium-based browser)
+- **For Gemini provider (recommended):** A Google account to get a free API key
+- **For Ollama provider:** [Ollama](https://ollama.com/download) installed locally
+- **For Local Server provider:** Python 3.10+ and Ollama installed locally
 
 ---
 
 ## Setup
 
-### 1. Install Ollama models
+### Option A — Gemini (recommended, no local software needed)
 
-```bash
-# For the Ollama provider (one-shot vision):
-ollama pull qwen2.5vl:7b
+**1. Get a free Gemini API key**
 
-# For the Local Server provider (translation step only):
-ollama pull qwen2.5:7b
-```
+1. Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and sign in with a Google account.
+2. Click **Create API key** → select **Default Gemini Project** → copy the key.
 
-You only need both if you want both providers available. Most users only need `qwen2.5vl:7b`.
-
-### 2. Build the extension
+**2. Build and load the extension**
 
 ```bash
 npm install
 npm run build
 ```
 
-This builds the React options page into `extension/options/`.
-
-### 3. Load the extension into Chrome
-
 1. Open `chrome://extensions`
 2. Turn on **Developer mode** (top right)
-3. Click **Load unpacked**
-4. Select the `extension/` folder
+3. Click **Load unpacked** → select the `extension/` folder
+4. Pin "Manga Translator Pro" to your toolbar
 
-You should see "Manga Translator Pro" appear with the speech-bubble icon. Pin it to your toolbar for easier access.
+**3. Paste your API key**
 
-### 4. (Optional) Start the local Python server
+Click the Manga Translator Pro icon → **Options** (or right-click → Options). The **Gemini** provider is already selected. Paste your key and click **Test connection**.
 
-Only required if you pick the **Local Server** provider in the extension's options.
+---
+
+### Option B — Ollama (local, offline)
+
+**1. Install Ollama models**
+
+```bash
+# Vision model for detect + OCR + translate (one-shot):
+ollama pull qwen2.5vl:7b
+
+# Or a smaller alternative (~1.7 GB):
+ollama pull moondream:latest
+```
+
+**2. Build and load the extension** (same as Option A steps 2 above)
+
+**3. Switch to Ollama in options**
+
+Open the extension's Options page → select **Ollama** → confirm the URL is `http://localhost:11434` → click **Test connection**.
+
+---
+
+### Option C — Local Server (highest OCR quality)
+
+Requires Ollama (for translation) plus a Python FastAPI server (for specialist manga-OCR).
+
+**1. Pull the translation model**
+
+```bash
+ollama pull qwen2.5:3b
+```
+
+**2. Start the Python server**
 
 ```bash
 cd server
+
+# Create and activate a virtual environment (one-time)
+python -m venv venv
+source venv/bin/activate        # Mac/Linux
+# venv\Scripts\activate         # Windows
+
 pip install -r requirements.txt
-uvicorn app:app --port 8000
+uvicorn app:app --port 8001
+```
+
+On subsequent runs, just activate the venv and start the server:
+
+```bash
+cd server
+source venv/bin/activate        # Mac/Linux
+# venv\Scripts\activate         # Windows
+uvicorn app:app --port 8001
 ```
 
 First run downloads the manga-ocr model (~400 MB). Subsequent runs are fast.
+
+**3. Build and load the extension** (same as Option A steps 2 above)
+
+**4. Switch to Local Server in options**
+
+Open the extension's Options page → select **Local Server** → confirm the URL is `http://localhost:8001` → click **Test connection**.
 
 ---
 
 ## Daily usage
 
-1. Make sure Ollama is running: `ollama serve` (or it auto-starts on Mac/Windows)
-2. Open any manga page — MangaDex, rawkuma, syosetu, whatever
-3. Click the **Manga Translator Pro** icon in your toolbar
-4. Click **Translate page** in the popup
-5. English overlays appear on the detected bubbles
+1. Open any manga page — MangaDex, rawkuma, syosetu, etc.
+2. Click the **Manga Translator Pro** icon in your toolbar.
+3. Click **Translate page** in the popup.
+4. English overlays appear on the detected bubbles.
+
+> **Gemini users:** No local software needs to be running.
+>
+> **Ollama / Local Server users:** Make sure `ollama serve` is running first (it auto-starts on Mac/Windows).
 
 For repeated translation as you scroll, enable **Auto-translate on scroll** in the popup or options.
 
@@ -108,7 +164,7 @@ npm run lint
 npm run package
 ```
 
-When developing the extension, after any change to `extension/*.js` you need to click the reload icon next to "Manga Translator Pro" in `chrome://extensions`. React changes to the options page auto-rebuild if you used `build:watch`.
+When developing the extension, after any change to `extension/*.js` click the reload icon next to "Manga Translator Pro" in `chrome://extensions`. React changes to the options page auto-rebuild if you used `build:watch`.
 
 ---
 
@@ -123,8 +179,9 @@ manga-translator-pro/
 │   ├── popup.html / popup.js     # Toolbar popup
 │   ├── icons/                    # 16/48/128 px
 │   ├── providers/                # Pluggable backend interfaces
-│   │   ├── ollama.js
-│   │   └── localServer.js
+│   │   ├── gemini.js             # Google Gemini vision API
+│   │   ├── ollama.js             # Local Ollama vision model
+│   │   └── localServer.js        # FastAPI + manga-ocr server
 │   └── options/                  # Built React options page (npm run build)
 ├── src/                          # React source (compiled into extension/options/)
 │   ├── App.tsx
@@ -137,7 +194,7 @@ manga-translator-pro/
 │   └── lib/
 │       ├── storage.ts            # Typed chrome.storage wrapper
 │       └── types.ts
-├── server/                       # Optional FastAPI backend
+├── server/                       # Optional FastAPI backend (Option C)
 │   ├── app.py
 │   ├── requirements.txt
 │   └── README.md
@@ -150,11 +207,10 @@ manga-translator-pro/
 
 ## Roadmap
 
-- [x] **Phase 1** — Ollama + Local server providers, DPR-correct overlays, polished UI
-- [ ] **Phase 2** — Multi-provider VLM (add Gemini, Claude, GPT-4o)
-- [ ] **Phase 3** — Glossary memory (character names stay consistent across pages)
-- [ ] **Phase 4** — Hosted backend with subscription
-- [ ] **Phase 5** — Site-specific adapters (capture full-resolution manga images, not viewport screenshots)
+- [x] **Phase 1** — Gemini API + Ollama + Local server providers, DPR-correct overlays, polished options UI
+- [ ] **Phase 2** — Additional cloud providers (Claude, GPT-4o); glossary memory for character names
+- [ ] **Phase 3** — Hosted backend with subscription
+- [ ] **Phase 4** — Site-specific adapters (capture full-resolution images, not viewport screenshots)
 
 ---
 
@@ -162,7 +218,11 @@ manga-translator-pro/
 
 **"Cannot reach Ollama"** — Run `ollama serve` in a terminal. On Mac/Windows it should auto-start.
 
-**"Model not installed"** — `ollama pull qwen2.5vl:7b`.
+**"Model not installed"** — Run `ollama pull qwen2.5vl:7b` (or whichever model is selected in options).
+
+**Gemini 429 / quota exceeded** — You've hit the free-tier limit (~1500 req/day for gemini-2.0-flash). Either wait for the daily reset or switch the model to **Gemini 1.5 Flash** in options (more consistent free quota).
+
+**Gemini API key not working** — Make sure the key was created with **Default Gemini Project** selected at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Keys created under other projects may have zero Gemini quota.
 
 **Overlays appear in the wrong place** — Browser zoom or Retina display issue. Reset zoom to 100% (`Ctrl+0`). The DPR fix in `content.js` handles most cases but extreme zoom levels can still drift.
 
