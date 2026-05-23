@@ -240,11 +240,12 @@
     const dpr = lastDpr;
     const scrollX = lastViewportScroll.x;
     const scrollY = lastViewportScroll.y;
+    const contentBounds = detectContentBounds();
 
     for (const item of results) {
-      const cssLeft = item.x / dpr + scrollX;
+      let cssLeft = item.x / dpr + scrollX;
       const cssTop = item.y / dpr + scrollY;
-      const cssWidth = item.w / dpr;
+      let cssWidth = item.w / dpr;
       const cssHeight = item.h / dpr;
 
       // Skip bogus boxes. Two failure modes to reject:
@@ -261,6 +262,23 @@
       if (cssWidth * cssHeight > viewportArea * 0.4) {
         console.warn('[MangaTranslator] skipping overlay covering >40% of viewport');
         continue;
+      }
+
+      // Nudge boxes that land in the dark page margins (Gemini left/right spatial bias).
+      // Only correct if the misplacement is small (<= 100px) — large errors are skipped.
+      if (contentBounds) {
+        const TOL = 100;
+        if (cssLeft < contentBounds.left && contentBounds.left - cssLeft <= TOL) {
+          cssLeft = contentBounds.left;
+        }
+        const cssRight = cssLeft + cssWidth;
+        if (cssRight > contentBounds.right && cssRight - contentBounds.right <= TOL) {
+          if (cssLeft >= contentBounds.right) {
+            cssLeft = Math.max(contentBounds.left, contentBounds.right - cssWidth);
+          } else {
+            cssWidth = contentBounds.right - cssLeft;
+          }
+        }
       }
 
       const el = document.createElement('div');
@@ -290,6 +308,23 @@
     // 0.5x area-per-char ≈ reasonable readability budget
     const px = Math.sqrt((area * 0.45) / len);
     return Math.max(10, Math.min(22, Math.round(px)));
+  }
+
+  // Returns the document-coordinate left/right bounds of large images currently
+  // in the viewport. Used to detect the manga content area vs. dark page margins.
+  function detectContentBounds() {
+    const large = [...document.querySelectorAll('img')].filter((img) => {
+      const r = img.getBoundingClientRect();
+      return r.width > 100 && r.height > 100 && r.top < window.innerHeight && r.bottom > 0;
+    });
+    if (!large.length) return null;
+    let minLeft = Infinity, maxRight = -Infinity;
+    for (const img of large) {
+      const r = img.getBoundingClientRect();
+      minLeft = Math.min(minLeft, r.left + window.scrollX);
+      maxRight = Math.max(maxRight, r.right + window.scrollX);
+    }
+    return Number.isFinite(minLeft) ? { left: minLeft, right: maxRight } : null;
   }
 
   // -----------------------------------------------------
