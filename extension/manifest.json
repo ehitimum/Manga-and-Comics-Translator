@@ -1,11 +1,18 @@
 {
   "manifest_version": 3,
   "name": "Manga Translator Pro",
-  "version": "0.3.99.1",
-  "version_name": "0.4.0-beta.1",
+  "version": "0.4.99.1",
+  "version_name": "0.5.0-beta.1",
   "description": "Automatically translate visible Japanese manga in place with local OCR and translation.",
-  "permissions": ["activeTab", "storage", "scripting", "offscreen"],
-  "optional_host_permissions": ["*://*/*"],
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "offscreen"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
+  ],
   "host_permissions": [
     "http://localhost/*",
     "http://127.0.0.1/*",
@@ -16,14 +23,63 @@
     "https://syosetu.com/*",
     "https://*.syosetu.com/*"
   ],
-  "content_security_policy": {"extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"},
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "Manga Translator Pro",
-    "default_icon": {"16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png"}
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
-  "icons": {"16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png"},
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "options_page": "options/index.html",
-  "background": {"service_worker": "background.js", "type": "module"},
-  "web_accessible_resources": [{"resources": ["icons/*"], "matches": ["<all_urls>"]}]
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "cross_origin_embedder_policy": {
+    "value": "credentialless"
+  },
+  "cross_origin_opener_policy": {
+    "value": "same-origin"
+  },
+  "commands": {
+    "translate-page": {
+      "suggested_key": {
+        "default": "Alt+Shift+T"
+      },
+      "description": "Translate the visible page"
+    },
+    "toggle-original": {
+      "suggested_key": {
+        "default": "Alt+Shift+O"
+      },
+      "description": "Show original / translation"
+    },
+    "toggle-auto": {
+      "suggested_key": {
+        "default": "Alt+Shift+A"
+      },
+      "description": "Toggle auto-translate on scroll"
+    }
+  },
+  "minimum_chrome_version": "128"
 }

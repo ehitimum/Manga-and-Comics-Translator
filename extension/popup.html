@@ -140,10 +140,18 @@
       <div class="row">
         <button id="translate-btn">Translate page</button>
       </div>
+      <div class="row">
+        <button id="original-btn" class="secondary">Show original</button>
+        <button id="snapshot-btn" class="secondary" title="Open the last capture with its translation in a separate tab">Snapshot view</button>
+      </div>
 
       <label class="toggle">
         <input type="checkbox" id="auto-mode" />
         Auto-translate on scroll
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="site-auto" />
+        <span>Always translate on <b id="site-name">this site</b></span>
       </label>
 
       <div class="hint" id="hint">
@@ -158,6 +166,6 @@
       </footer>
     </div>
 
-    <script src="popup.js"></script>
+    <script type="module" src="popup.js"></script>
   </body>
 </html>

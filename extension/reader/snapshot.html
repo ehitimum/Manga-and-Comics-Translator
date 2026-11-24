@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Translated snapshot · Manga Translator Pro</title>
+<style>
+  body { margin: 0; background: #1e1e1e; color: #eee; font: 14px/1.4 system-ui, sans-serif; }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 16px; background: #111; position: sticky; top: 0; z-index: 2; }
+  header p { margin: 0; flex: 1; color: #aaa; }
+  button { font: inherit; padding: 6px 12px; cursor: pointer; }
+  #stage { position: relative; margin: 16px auto; width: fit-content; max-width: calc(100vw - 32px); }
+  #stage img { display: block; max-width: 100%; }
+  #stage.original .mtp-o { display: none; }
+</style>
+<header><p id="info">Loading…</p><button id="toggle">Show original</button></header>
+<div id="stage"><img id="shot" alt="Captured page"></div>
+<script src="../render/fit.js"></script>
+<script src="snapshot.js"></script>
+</html>

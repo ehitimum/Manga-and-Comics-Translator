@@ -1,0 +1,30 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # onnxruntime-node's install script downloads CUDA binaries the extension never uses.
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Japanese font and Chromium for the end-to-end checks
+        run: |
+          sudo apt-get update && sudo apt-get install -y fonts-ipafont-gothic
+          npx playwright install --with-deps chromium
+      - uses: actions/cache@v4
+        with:
+          path: tests/.cache
+          key: tessdata-${{ hashFiles('extension/reader/models.js') }}
+      # Accuracy and overlay checks fail the build; timings are printed (shared runners are noisy).
+      - run: xvfb-run -a npm run test:e2e
