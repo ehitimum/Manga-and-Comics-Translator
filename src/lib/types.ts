@@ -1,6 +1,6 @@
 // Shared types for the options page.
 
-export type ProviderId = 'ollama' | 'local' | 'gemini';
+export type ProviderId = 'browser' | 'ollama' | 'local' | 'gemini';
 
 export interface Settings {
   provider: ProviderId;
@@ -26,7 +26,7 @@ export interface ConnectionTestResult {
 // For production / max accuracy, switch to gemini-2.5-pro in the options dropdown
 // (requires paid quota enabled for Pro in your Google Cloud billing project).
 export const DEFAULT_SETTINGS: Settings = {
-  provider: 'gemini',
+  provider: 'browser',
   ollamaUrl: 'http://localhost:11434',
   ollamaModel: 'moondream:latest',
   localServerUrl: 'http://localhost:8001',

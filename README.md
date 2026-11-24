@@ -1,20 +1,20 @@
 # Manga Translator Pro
 
-A Chrome extension that translates Japanese manga into English in-place on any web page. Works on MangaDex, raw Japanese aggregator sites, and anywhere manga is rendered as images.
+## Test v0.3.2
 
-Supports three translation providers: **Gemini API** (cloud, free, recommended), **Ollama** (local, offline), and a **Local FastAPI server** (specialist manga-OCR pipeline).
+Download the [extension ZIP](https://github.com/ehitimum/Manga-and-Comics-Translator/releases/tag/v0.3.2), extract it and load the folder containing `manifest.json` from **chrome://extensions → Developer mode → Load unpacked**. If you loaded the repository's `extension` folder earlier, click **Reload** for Manga Translator Pro.
 
-## Test v0.3.1
+1. Open the toolbar popup and choose **Translate typed text**. Enter **ありがとう** and click **Translate to English**. Expect “Thank you.” Ten common phrases have a labeled built-in translation when the Chrome language pack is missing. Other phrases use Chrome’s on-demand language pack. If it takes too long or is unavailable, **Send this text to Google Translate** opens the online translation.
+2. For image text, open a manga page on HTTP or HTTPS, choose **Read a bubble**, and drag around a single block of Japanese in the screenshot. Choose its writing direction and click **Read selection**. Correct the recognized Japanese if needed, then translate. Repeat for another bubble in the same capture.
+3. New installations and upgrades from Gemini with an empty key use **Chrome Translator**. If a different provider is configured, select Chrome Translator in Settings to use the bubble reader. Gemini, Ollama and FastAPI retain their automatic overlay workflow.
 
-Download the [extension ZIP](https://github.com/ehitimum/Manga-and-Comics-Translator/releases/tag/v0.3.1), extract it, open `chrome://extensions`, enable **Developer mode**, and select the extracted folder with **Load unpacked**. From a checkout, load the `extension` directory directly.
-
-Open the toolbar popup and select **Try sample page**. Click **Translate** to see two English speech bubbles, then **Show original** and **Show translation** to compare. The sample uses preset text. For a live test, configure a provider in **Settings**, open an HTTP(S) manga page and click **Translate page**. Keep the viewport still until results appear.
+The reader runs Tesseract.js in local WebAssembly. It downloads the selected Japanese OCR weights on request and verifies their size and SHA-256 before caching. Horizontal and vertical data are 2.47 MB and 3.04 MB respectively. **Remove downloaded OCR models** clears those files. Chrome separately manages its translation language packs. The online fallback sends only the text when you open the link. [Chrome Translator API](https://developer.chrome.com/docs/ai/translator-api) · [OCR model source and Apache 2.0 license](https://github.com/tesseract-ocr/tessdata_fast/tree/87416418657359cb625c412a48b6e1d6d41c29bd)
 
 The [GitHub wiki](https://github.com/ehitimum/Manga-and-Comics-Translator/wiki/Development-Roadmap) and [repository roadmap](docs/Development-Roadmap.md) track release history and phase acceptance checks.
 
 ---
 
-## Architecture
+## Optional automatic overlay providers
 
 ```
 ┌─────────────────────┐         ┌──────────────────────────────┐
@@ -38,7 +38,7 @@ The [GitHub wiki](https://github.com/ehitimum/Manga-and-Comics-Translator/wiki/D
 
 | Provider | Setup | Privacy | Cost |
 |---|---|---|---|
-| **Gemini API** (default) | Paste a free API key | Sends images to Google | Free ~1500 req/day |
+| **Gemini API** | Paste a free API key | Sends images to Google | Free ~1500 req/day |
 | **Ollama** | Install + pull model | Fully local | Free, needs ~6GB RAM |
 | **Local Server** | Python + Ollama | Fully local | Free, best OCR quality |
 
@@ -48,7 +48,7 @@ The [GitHub wiki](https://github.com/ehitimum/Manga-and-Comics-Translator/wiki/D
 
 - Node.js 20+
 - Chrome / Chromium / Edge / Brave (any Chromium-based browser)
-- **For Gemini provider (recommended):** A Google account to get a free API key
+- **For Gemini provider:** A Google account to get a free API key
 - **For Ollama provider:** [Ollama](https://ollama.com/download) installed locally
 - **For Local Server provider:** Python 3.10+ and Ollama installed locally
 
@@ -56,7 +56,7 @@ The [GitHub wiki](https://github.com/ehitimum/Manga-and-Comics-Translator/wiki/D
 
 ## Setup
 
-### Option A — Gemini (recommended, no local software needed)
+### Option A — Gemini
 
 **1. Get a free Gemini API key**
 
@@ -79,7 +79,7 @@ npm run build
 
 **3. Paste your API key**
 
-Click the Manga Translator Pro icon → **Options** (or right-click → Options). The **Gemini** provider is already selected. Paste your key and click **Test connection**.
+Click the Manga Translator Pro icon → **Options** (or right-click → Options). Select the **Gemini** provider. Paste your key and click **Test connection**.
 
 ---
 

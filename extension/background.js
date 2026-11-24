@@ -16,7 +16,7 @@ import { translateWithLocalServer, testLocalServer } from './providers/localServ
 import { translateWithGemini, testGemini } from './providers/gemini.js';
 
 const DEFAULT_SETTINGS = {
-  provider: 'gemini',                       // 'ollama' | 'local' | 'gemini' — Gemini is the easy path
+  provider: 'browser',
   ollamaUrl: 'http://localhost:11434',
   ollamaModel: 'moondream:latest',          // small vision model (~1.7GB). qwen2.5vl:7b is better but RAM-heavy.
   localServerUrl: 'http://localhost:8001',  // matches `python app.py` default
@@ -24,6 +24,18 @@ const DEFAULT_SETTINGS = {
   geminiModel: 'gemini-2.5-flash',          // Dev default. For production: switch to gemini-2.5-pro (better spatial reasoning, requires Pro billing).
   autoMode: false,
 };
+
+import { ocrCache, modelUrl, models } from './reader/models.js';
+
+self.addEventListener('fetch', event => {
+  const prefix = chrome.runtime.getURL('reader/data/');
+  if (event.request.url.startsWith(prefix)) {
+    const code = event.request.url.slice(prefix.length).replace(/\.traineddata$/, '');
+    if (!Object.hasOwn(models, code)) return;
+    event.respondWith(caches.open(ocrCache).then(async cache =>
+      await cache.match(modelUrl(code)) || new Response('OCR model missing', { status: 404 })));
+  }
+});
 
 let isProcessing = false;
 
@@ -184,11 +196,14 @@ async function getSettings() {
 // Init: write defaults on install
 // ------------------------------------------------------------
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   const stored = await chrome.storage.local.get(Object.keys(DEFAULT_SETTINGS));
   const missing = {};
   for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
     if (stored[k] === undefined) missing[k] = v;
+  }
+  if (details.reason === 'update' && stored.provider === 'gemini' && !stored.geminiApiKey?.trim()) {
+    missing.provider = 'browser';
   }
   if (Object.keys(missing).length > 0) {
     await chrome.storage.local.set(missing);

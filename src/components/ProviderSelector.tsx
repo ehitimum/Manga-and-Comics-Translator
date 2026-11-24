@@ -11,9 +11,16 @@ interface ProviderOption {
 
 const PROVIDERS: ProviderOption[] = [
   {
+    id: 'browser',
+    name: 'Chrome Translator',
+    tagline: 'Japanese to English',
+    features: ['No API key', 'Select a bubble or paste text', 'Runs in the browser'],
+    icon: '文',
+  },
+  {
     id: 'gemini',
     name: 'Gemini API',
-    tagline: 'Google Gemini (recommended)',
+    tagline: 'Google Gemini API',
     features: ['Best at bubble vs background', 'Strong Japanese OCR', 'Free ~1500 req/day'],
     icon: '✨',
   },

@@ -12,6 +12,7 @@ const buildLabel = document.getElementById('build-label');
 const PROVIDER_LABELS = {
   ollama: 'Ollama (local)',
   local: 'Local FastAPI server',
+  browser: 'Chrome Translator',
   gemini: 'Gemini API (cloud)',
 };
 
@@ -32,12 +33,20 @@ function setStatus(state, text) {
 }
 
 async function loadSettingsAndProbe() {
-  const { provider = 'gemini', autoMode = false } = await chrome.storage.local.get([
+  const { provider = 'browser', autoMode = false } = await chrome.storage.local.get([
     'provider', 'autoMode',
   ]);
   providerLabel.textContent = PROVIDER_LABELS[provider] || provider;
   autoModeToggle.checked = autoMode;
 
+  if (provider === 'browser') {
+    translateBtn.textContent = 'Read a bubble';
+    autoModeToggle.closest('label').hidden = true;
+    autoModeToggle.closest('label').style.display = 'none';
+    setStatus('ok', 'Japanese → English');
+    hint.textContent = 'Open a manga page and select one bubble from a screenshot. You can also type Japanese text.';
+    return;
+  }
   setStatus('', 'Checking provider…');
 
   chrome.runtime.sendMessage({ action: 'test_connection', provider }, (res) => {
@@ -75,6 +84,22 @@ translateBtn.addEventListener('click', async () => {
       throw new Error("Can't translate this page (not a regular http/https page).");
     }
 
+    const { provider = 'browser' } = await chrome.storage.local.get('provider');
+    if (provider === 'browser') {
+      const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+      const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+      if (active?.id !== tab.id) throw new Error('The active page changed. Try again.');
+      const key = 'capture-' + crypto.randomUUID();
+      await chrome.storage.session.set({ [key]: screenshot });
+      try {
+        await chrome.tabs.create({ url: chrome.runtime.getURL('reader/index.html#' + key) });
+      } catch (err) {
+        await chrome.storage.session.remove(key);
+        throw err;
+      }
+      window.close();
+      return;
+    }
     // Inject content script on demand, then trigger translation
     const inj = await chrome.runtime.sendMessage({ action: 'inject_content_script', tabId: tab.id });
     if (!inj?.ok) throw new Error(inj?.error || 'Failed to inject content script');
@@ -87,7 +112,7 @@ translateBtn.addEventListener('click', async () => {
   } catch (err) {
     setStatus('err', err.message);
     translateBtn.disabled = false;
-    translateBtn.textContent = 'Translate page';
+    translateBtn.textContent = providerLabel.textContent === PROVIDER_LABELS.browser ? 'Read a bubble' : 'Translate page';
   }
 });
 

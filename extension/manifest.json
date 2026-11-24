@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Manga Translator Pro",
-  "version": "0.3.1",
-  "description": "Translate Japanese manga panels into English on the page, powered by local Ollama or a self-hosted server.",
+  "version": "0.3.2",
+  "description": "Read Japanese manga bubbles with local OCR and key-free translation in Chrome.",
   "permissions": ["activeTab", "storage", "scripting"],
   "optional_host_permissions": ["*://*/*"],
   "host_permissions": [
@@ -15,6 +15,7 @@
     "https://syosetu.com/*",
     "https://*.syosetu.com/*"
   ],
+  "content_security_policy": {"extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"},
   "action": {
     "default_popup": "popup.html",
     "default_title": "Manga Translator Pro",

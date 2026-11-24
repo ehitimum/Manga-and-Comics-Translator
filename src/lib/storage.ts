@@ -68,7 +68,7 @@ export function useSettings(): {
 /**
  * Ask the background service worker to test a provider's connection.
  */
-export function testConnection(provider: 'ollama' | 'local' | 'gemini') {
+export function testConnection(provider: Settings['provider']) {
   return new Promise<import('./types').ConnectionTestResult>((resolve) => {
     chrome.runtime.sendMessage({ action: 'test_connection', provider }, (res) => {
       if (chrome.runtime.lastError) {

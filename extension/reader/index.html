@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bubble reader · Manga Translator Pro</title>
+<style>
+*{box-sizing:border-box}body{font:16px/1.5 system-ui;color:#17243a;background:#f5f4ef;margin:0}
+main{max-width:900px;margin:auto;padding:32px 20px}h1{font:2.2rem Georgia,serif;margin:0}h2{font-size:1.15rem}
+section{margin:20px 0;padding:20px;border:1px solid #ced3d8;background:white;border-radius:10px}
+textarea{width:100%;min-height:80px;font:inherit;padding:10px}button,select{font:inherit;padding:7px 12px}
+button{cursor:pointer}button:disabled{cursor:default}#stage{position:relative;line-height:0;margin-bottom:12px;touch-action:none;cursor:crosshair}
+img{width:100%;user-select:none}#box{position:absolute;border:2px solid #1269ca;background:#408fff33;pointer-events:none}
+output{display:block;white-space:pre-wrap;font-size:1.2rem}small{display:block;color:#424f5c}a{color:#145c9c}
+</style>
+<main>
+<h1>Bubble reader</h1>
+<section id="capture" hidden>
+<h2>Select a speech bubble</h2>
+<p>Drag around one block of Japanese lettering. Include a small margin around the characters.</p>
+<div id="stage"><img id="image" alt="Captured manga page" draggable="false"><div id="box" hidden></div></div>
+<label>Writing direction <select id="direction"><option value="jpn">Horizontal · 2.47 MB</option><option value="jpn_vert">Vertical · 3.04 MB</option></select></label>
+<button id="recognize" disabled>Read selection</button>
+<small>First use downloads the selected OCR model. The captured page stays in this browser.</small>
+</section>
+<section><h2><label for="source">Japanese text</label></h2>
+<textarea id="source" lang="ja" maxlength="5000" placeholder="Type Japanese or review the text from a bubble."></textarea>
+<button id="translate" disabled>Translate to English</button>
+<button id="cancel" hidden>Cancel translation</button>
+<small>Chrome may download its translation language pack the first time.</small>
+<p id="status" role="status"></p><output id="result" lang="en"></output>
+<p><a id="online" target="_blank" rel="noopener noreferrer" hidden>Send this text to Google Translate</a></p>
+</section>
+<button id="remove">Remove downloaded OCR models</button>
+</main>
+<script src="vendor/tesseract.min.js"></script><script type="module" src="reader.js"></script>
+</html>
