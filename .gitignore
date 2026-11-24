@@ -24,3 +24,6 @@ Thumbs.db
 *.log
 npm-debug.log*
 extension/engine/vendor/
+
+# test caches
+tests/.cache/

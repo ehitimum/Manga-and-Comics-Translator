@@ -1,16 +1,24 @@
 # Manga Translator Pro
 
-## Test v0.4.0 beta
+## Test v0.5.0 beta
 
-Download the [extension ZIP](https://github.com/ehitimum/Manga-and-Comics-Translator/releases/tag/v0.4.0-beta.1). Extract it and select the folder containing `manifest.json` under **chrome://extensions → Developer mode → Load unpacked**. From a source checkout, run `npm ci` and `npm run build` before loading or reloading `extension`.
+From a source checkout, run `npm ci --ignore-scripts` and `npm run build`. Then open **chrome://extensions**, turn on **Developer mode**, click **Load unpacked**, and select the `extension` folder. Requires Chrome 128 or later.
 
-1. Open a Japanese manga page on HTTP or HTTPS. Choose **Chrome Translator** in Settings if you previously configured another provider.
-2. Open the extension popup and click **Translate page**. Stay on the manga tab while the extension detects and reads the visible bubbles. English appears over the original page.
-3. Use **Show original** to compare, or enable **Auto-translate on scroll** to process the next viewport after scrolling stops.
+1. Open a Japanese manga page and click **Translate page** in the popup, or press **Alt+Shift+T**. English appears inside each bubble, fitted to its shape, and stays aligned while you scroll, zoom or resize.
+2. Use **Show original** (popup, floating button or **Alt+Shift+O**) to compare.
+3. Turn on **Auto-translate on scroll** (or **Alt+Shift+A**) for long strips. New bubbles are translated when scrolling stops, and images below the screen are read ahead, so they are usually ready when you get there. Already-translated bubbles come from a cache.
+4. **Always translate on this site** in the popup asks for that site's permission once. After that, every chapter on the site translates on load.
+5. If a site hides or deletes the overlay, use **Snapshot view** in the popup. It opens the last capture with its translation in a separate tab.
+6. Optional: **Settings → Accurate mode** downloads PP-OCRv5 (about 19 MB, Apache-2.0, checksum-verified). It re-reads unclear bubbles and finds text outside bubbles, at some cost in speed.
 
-The default pipeline uses local bubble detection and horizontal and vertical Japanese OCR. If Chrome’s Japanese-to-English translator is ready, the extension uses it. Otherwise it downloads a quantized OPUS-MT model and runs it locally with ONNX Runtime WASM. Allow about 120 MB for the first fallback run, including OCR models. The default pipeline keeps manga pixels and recognized text on the device. Existing configured providers retain their own processing paths. [Chrome Translator API](https://developer.chrome.com/docs/ai/translator-api) · [OPUS-MT model and license](https://huggingface.co/Helsinki-NLP/opus-mt-ja-en)
+**How it works.**
+- Manga images are read directly from the page when the site allows it; otherwise the visible tab is captured.
+- Bubbles are found with a fast local detector and read by a warm pool of Tesseract workers (SIMD build).
+- Translation uses Chrome's built-in translator when available. Clicking Translate in the popup starts Chrome's Japanese language-pack download if it is missing. The fallback is a local OPUS-MT model.
+- Overlays live in the browser's top layer, so they stay above fullscreen readers, dialogs and high z-index layers, and let clicks through.
+- Pixels and text stay on the device. [Chrome Translator API](https://developer.chrome.com/docs/ai/translator-api) · [OPUS-MT model and license](https://huggingface.co/Helsinki-NLP/opus-mt-ja-en)
 
-This beta uses viewport capture and heuristic speech-bubble detection. Stylized lettering, clipped bubbles and textured art can reduce recall. The **Translate typed text** tool remains available in the popup.
+Tests and benchmarks: see [docs/Benchmarks.md](docs/Benchmarks.md). Model choices: see [docs/Accurate-Mode.md](docs/Accurate-Mode.md).
 
 The [GitHub wiki](https://github.com/ehitimum/Manga-and-Comics-Translator/wiki/Development-Roadmap) and [repository roadmap](docs/Development-Roadmap.md) track release history and phase acceptance checks.
 

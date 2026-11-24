@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<title>Synthetic manga viewport</title>
+<style>
+  html, body { margin: 0; background: #1e1e1e; }
+  body { width: 1280px; height: 800px; overflow: hidden; position: relative; font-family: 'IPAGothic', sans-serif; }
+  .page { position: absolute; left: 360px; top: 6px; width: 560px; height: 900px; background: #fff; }
+  .panel { position: absolute; border: 3px solid #111; box-sizing: border-box; overflow: hidden; background: #fff; }
+  .tone { background-image: radial-gradient(#555 1.1px, transparent 1.4px); background-size: 6px 6px; }
+  .hatch { background: repeating-linear-gradient(120deg, #222 0 1px, #fff 1px 7px); }
+  .gray { background: linear-gradient(160deg, #bbb, #777 60%, #999); }
+  .bubble { position: absolute; background: #fff; border: 2px solid #111; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+  .box { border-radius: 0; }
+  .dark { background: #0b0b0b; border-color: #0b0b0b; }
+  .t { font-size: 17px; line-height: 1.3; color: #111; letter-spacing: 1px; white-space: nowrap; }
+  .v { writing-mode: vertical-rl; text-orientation: upright; }
+  .dark .t { color: #fff; }
+  .sfx { position: absolute; font-size: 64px; font-weight: bold; color: #fff; -webkit-text-stroke: 3px #111; transform: rotate(-12deg); }
+  svg { position: absolute; inset: 0; }
+</style>
+<div class="page">
+  <!-- Panel 1 (reads first: top right) -->
+  <div class="panel tone" style="left:285px;top:8px;width:267px;height:300px">
+    <div class="bubble" data-gt="どうしてここにいるの？" data-dir="v" style="left:150px;top:18px;width:96px;height:196px">
+      <div class="t v">どうしてここに<br>いるの？</div></div>
+  </div>
+  <!-- Panel 2: hatching plus a large blank sky (false-positive bait) -->
+  <div class="panel hatch" style="left:8px;top:8px;width:270px;height:300px">
+    <div style="position:absolute;left:0;top:0;width:100%;height:120px;background:#fff;border-bottom:3px solid #111"></div>
+    <div class="bubble" data-gt="早く逃げろ！" data-dir="v" style="left:180px;top:130px;width:74px;height:150px">
+      <div class="t v">早く<br>逃げろ！</div></div>
+    <div class="bubble dark" data-gt="お前は誰だ" data-dir="v" style="left:40px;top:150px;width:80px;height:128px">
+      <div class="t v">お前は<br>誰だ</div></div>
+  </div>
+  <!-- Panel 3: grey art, a wide multi-column vertical bubble, a horizontal bubble, SFX without a bubble -->
+  <div class="panel gray" style="left:8px;top:316px;width:544px;height:214px">
+    <svg width="544" height="214" id="strokes"></svg>
+    <div class="bubble" data-gt="待って、まだ話は終わってない" data-dir="v" style="left:372px;top:22px;width:158px;height:170px">
+      <div class="t v">待って、<br>まだ話は<br>終わってない</div></div>
+    <div class="bubble" data-gt="なにこれ…" data-dir="h" style="left:50px;top:20px;width:170px;height:66px">
+      <div class="t">なにこれ…</div></div>
+    <div class="sfx" data-gt="ドドド" data-dir="h" style="left:190px;top:96px">ドドド</div>
+  </div>
+  <!-- Panel 4: narration box, a normal bubble, and a bubble cut off by the viewport bottom -->
+  <div class="panel tone" style="left:8px;top:538px;width:544px;height:354px">
+    <div class="bubble box" data-gt="その日、世界は変わった。" data-dir="v" style="left:462px;top:18px;width:66px;height:180px">
+      <div class="t v">その日、<br>世界は変わった。</div></div>
+    <div class="bubble" data-gt="今日は本当にありがとう" data-dir="v" style="left:290px;top:30px;width:104px;height:200px">
+      <div class="t v">今日は本当に<br>ありがとう</div></div>
+    <div class="bubble" data-gt="またね" data-dir="v" style="left:80px;top:212px;width:84px;height:140px">
+      <div class="t v">また<br>ね</div></div>
+  </div>
+</div>
+<script>
+  // Deterministic "artwork" strokes.
+  let seed = 7;
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const svg = document.getElementById('strokes');
+  for (let i = 0; i < 70; i++) {
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const x = rand() * 544, y = rand() * 214;
+    p.setAttribute('d', `M${x} ${y} q ${rand() * 80 - 40} ${rand() * 80 - 40} ${rand() * 120 - 60} ${rand() * 60 - 30}`);
+    p.setAttribute('stroke', rand() > 0.5 ? '#111' : '#eee');
+    p.setAttribute('stroke-width', (1 + rand() * 3).toFixed(1));
+    p.setAttribute('fill', 'none');
+    svg.appendChild(p);
+  }
+</script>
+</html>
