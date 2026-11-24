@@ -4,6 +4,7 @@ import { RECOMMENDED_OLLAMA_MODELS, RECOMMENDED_GEMINI_MODELS } from './lib/type
 import { ProviderSelector } from './components/ProviderSelector';
 import { ConnectionTester } from './components/ConnectionTester';
 import { Card, CardHeader, Toggle, TextField, Select } from './components/ui';
+import { AccurateModeToggle, AutoSites } from './components/Behavior';
 
 export default function App() {
   const { settings, loading, update } = useSettings();
@@ -204,8 +205,10 @@ uvicorn app:app --port 8001`}
                 checked={settings.autoMode}
                 onChange={(v) => update({ autoMode: v })}
                 label="Auto-translate on scroll"
-                description="Re-translate automatically 1.5 seconds after you stop scrolling."
+                description="Translate newly visible bubbles when scrolling stops, and read ahead in long strips."
               />
+              <AccurateModeToggle enabled={settings.accurateMode} onChange={(v) => update({ accurateMode: v })} />
+              <AutoSites sites={settings.autoSites} />
             </div>
           </Card>
         </motion.section>

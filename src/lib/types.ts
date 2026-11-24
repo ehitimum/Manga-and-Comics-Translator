@@ -10,6 +10,8 @@ export interface Settings {
   geminiApiKey: string;
   geminiModel: string;
   autoMode: boolean;
+  accurateMode: boolean;
+  autoSites: string[];
 }
 
 export interface ConnectionTestResult {
@@ -33,6 +35,8 @@ export const DEFAULT_SETTINGS: Settings = {
   geminiApiKey: '',
   geminiModel: 'gemini-2.5-flash',
   autoMode: false,
+  accurateMode: false,
+  autoSites: [],
 };
 
 export const RECOMMENDED_OLLAMA_MODELS = [
