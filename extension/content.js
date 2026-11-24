@@ -1,406 +1,374 @@
-// Content script for Manga Translator Pro.
+// Content script for Manga Translator Pro (injected on demand, or registered for "Always translate" sites).
 //
-// Injected on-demand by background.js (via chrome.scripting.executeScript).
-// Adds a floating "Translate" button to the page and draws translated text
-// overlays on top of detected manga bubbles.
-
+// Overlays live in one host element in the browser's top layer (popover="manual", closed shadow root),
+// so page z-index, fullscreen, modal dialogs and transforms cannot cover them, and clicks pass through.
+// Each overlay is anchored to the element under it (image, canvas, iframe) as fractions of that
+// element's box, so it follows inner scrolling, zoom, resizing and fit-to-width layouts.
 (() => {
   if (window.__mangaTranslatorInjected) return;
   window.__mangaTranslatorInjected = true;
 
-  // -----------------------------------------------------
-  // State
-  // -----------------------------------------------------
-  let autoMode = false;
-  let scrollTimer = null;
-  let translateAfterScroll = false;
-  const overlays = [];
-  let layoutRevision = 0;
+  const R = globalThis.MTPRender;
+  const isTop = window === window.top;
   const sampleMode = location.href === chrome.runtime.getURL('sample.html');
+  let autoMode = false, siteAuto = false, showOriginal = false, busy = false, pendingAuto = false, pendingManual = false;
+  let requestSeq = 0, current = null, imageSeq = 0, lastRun = null;
+  const items = [];
 
-  chrome.storage.local.get(['autoMode'], (r) => { autoMode = !!r.autoMode; });
-  chrome.storage.onChanged.addListener((changes) => {
-    if (changes.autoMode) autoMode = !!changes.autoMode.newValue;
-  });
+  // ------------------------------------------------------------ host
+  const host = document.createElement('mtp-layer');
+  host.setAttribute('popover', 'manual');
+  host.style.cssText = ['position:fixed', 'inset:0', 'width:auto', 'height:auto', 'margin:0', 'padding:0', 'border:0',
+    'background:transparent', 'overflow:visible', 'pointer-events:none', 'display:block', 'z-index:2147483647',
+    'visibility:visible', 'opacity:1', 'transform:none', 'filter:none'].map(d => d + ' !important').join(';');
+  const root = host.attachShadow({ mode: 'closed' });
+  const sheet = new CSSStyleSheet();
+  sheet.replaceSync(`:host { all: initial; }
+    .layer { position:absolute; inset:0; overflow:hidden; pointer-events:none; }
+    .layer.original { display:none; }
+    .controls { position:fixed; right:24px; bottom:24px; display:flex; flex-direction:column; align-items:flex-end; gap:8px;
+      font:600 13px/1.3 system-ui,sans-serif; pointer-events:none; }
+    .controls button { pointer-events:auto; cursor:pointer; border:0; border-radius:999px; padding:10px 18px; color:#fff;
+      background:linear-gradient(135deg,#2563eb,#4f46e5); box-shadow:0 4px 14px rgba(37,99,235,.35); font:inherit; }
+    .controls button.secondary { background:#fff; color:#172033; border:1px solid #777; border-radius:12px; padding:8px 14px; box-shadow:none; }
+    .controls button[data-busy="true"] { opacity:.75; cursor:progress; }
+    .controls button[data-error="true"] { background:linear-gradient(135deg,#dc2626,#991b1b); }
+    .toast { max-width:320px; padding:10px 14px; border-radius:8px; background:#0f172a; color:#fff; font-weight:400;
+      opacity:0; transform:translateY(6px); transition:opacity .2s, transform .2s; }
+    .toast[data-visible="true"] { opacity:1; transform:none; }
+    .toast[data-kind="error"] { background:#991b1b; }
+    [hidden] { display:none !important; }
+    ${R.CSS}`);
+  root.adoptedStyleSheets = [sheet];
+  const layer = document.createElement('div');
+  layer.className = 'layer';
+  root.append(layer);
 
-  // -----------------------------------------------------
-  // Inject styles (scoped via prefix to avoid clashes)
-  // -----------------------------------------------------
-  const STYLE_ID = 'manga-translator-styles';
-  if (!document.getElementById(STYLE_ID)) {
-    const style = document.createElement('style');
-    style.id = STYLE_ID;
-    style.textContent = `
-      #mtp-btn {
-        position: fixed;
-        bottom: 24px;
-        right: 24px;
-        z-index: 2147483646;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 10px 18px;
-        background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
-        color: #fff;
-        font-family: system-ui, -apple-system, sans-serif;
-        font-weight: 600;
-        font-size: 14px;
-        line-height: 1;
-        border-radius: 999px;
-        box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35), 0 2px 4px rgba(0,0,0,0.1);
-        cursor: pointer;
-        user-select: none;
-        transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
-      }
-      #mtp-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(37, 99, 235, 0.45); }
-      #mtp-btn:active { transform: translateY(0); }
-      #mtp-btn[data-busy="true"] { opacity: 0.75; cursor: progress; pointer-events: none; }
-      #mtp-btn[data-error="true"] {
-        background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
-      }
-
-      #mtp-btn .mtp-dot {
-        width: 8px; height: 8px; border-radius: 50%;
-        background: #facc15; box-shadow: 0 0 6px #facc15;
-      }
-      #mtp-btn[data-busy="true"] .mtp-dot { animation: mtp-pulse 0.9s ease-in-out infinite; }
-      @keyframes mtp-pulse {
-        0%, 100% { opacity: 1; transform: scale(1); }
-        50% { opacity: 0.3; transform: scale(0.7); }
-      }
-
-      .mtp-overlay {
-        position: absolute;
-        z-index: 2147483645;
-        background: #ffffff;
-        color: #0f172a;
-        border: 1.5px solid rgba(0, 0, 0, 0.55);
-        border-radius: 50% / 40%;
-        padding: 8px 10px;
-        font-family: 'Wild Words', 'Comic Sans MS', system-ui, sans-serif;
-        font-weight: 700;
-        font-size: 13px;
-        text-align: center;
-        line-height: 1.2;
-        word-wrap: break-word;
-        overflow: hidden;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-sizing: border-box;
-        pointer-events: auto;
-        cursor: text;
-      }
-
-      .mtp-automatic {
-        border: 0;
-        border-radius: 4px;
-        padding: 2px 5px;
-        min-height: 24px;
-        overflow-wrap: anywhere;
-      }
-
-      #mtp-toast {
-        position: fixed;
-        bottom: 118px;
-        right: 24px;
-        z-index: 2147483647;
-        max-width: 320px;
-        padding: 12px 16px;
-        background: #0f172a;
-        color: #fff;
-        font-family: system-ui, sans-serif;
-        font-size: 13px;
-        line-height: 1.4;
-        border-radius: 8px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.25);
-        opacity: 0;
-        transform: translateY(8px);
-        transition: opacity 0.2s, transform 0.2s;
-        pointer-events: none;
-      }
-      #mtp-toast[data-visible="true"] { opacity: 1; transform: translateY(0); }
-      #mtp-toast[data-kind="error"] { background: #991b1b; }
-    `;
-    document.head.appendChild(style);
+  let btn, compare, toast;
+  if (isTop) {
+    const controls = document.createElement('div');
+    controls.className = 'controls';
+    toast = document.createElement('div'); toast.className = 'toast';
+    compare = document.createElement('button'); compare.className = 'secondary'; compare.hidden = true; compare.textContent = 'Show original';
+    btn = document.createElement('button'); btn.textContent = 'Translate';
+    controls.append(toast, compare, btn);
+    root.append(controls);
+    btn.addEventListener('click', () => translate({ incremental: false }));
+    compare.addEventListener('click', () => setOriginal(!showOriginal));
   }
 
-  // -----------------------------------------------------
-  // UI: floating button + toast
-  // -----------------------------------------------------
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.id = 'mtp-btn';
-  btn.innerHTML = `<span class="mtp-dot"></span><span class="mtp-label">Translate</span>`;
-  document.body.appendChild(btn);
-
-  const compare = document.createElement('button');
-  compare.type = 'button';
-  compare.id = 'mtp-compare';
-  compare.textContent = 'Show original';
-  compare.hidden = true;
-  compare.style.cssText = 'position:fixed;right:24px;bottom:70px;z-index:2147483646;padding:8px 14px;background:white;color:#172033;border:1px solid #777;border-radius:12px;cursor:pointer';
-  document.body.appendChild(compare);
-  compare.addEventListener('click', () => {
-    const showOriginal = compare.textContent === 'Show original';
-    for (const overlay of overlays) overlay.style.display = showOriginal ? 'none' : 'flex';
-    compare.textContent = showOriginal ? 'Show translation' : 'Show original';
-  });
-
-  const toast = document.createElement('div');
-  toast.id = 'mtp-toast';
-  document.body.appendChild(toast);
-
-  function showToast(message, kind = 'info', durationMs = 3500) {
-    toast.textContent = message;
-    toast.dataset.kind = kind;
-    toast.dataset.visible = 'true';
-    clearTimeout(showToast._t);
-    showToast._t = setTimeout(() => {
-      toast.dataset.visible = 'false';
-    }, durationMs);
+  // Mount on <html>; if the page keeps deleting it, mount inside the reader instead (the top layer ignores
+  // ancestors' overflow, transforms and z-index). If even that fails, offer the snapshot view.
+  let removals = [], strikes = 0, gaveUp = false;
+  const fallbackMounts = () => [
+    items.find(i => i.anchor.isConnected)?.anchor.parentElement,
+    document.querySelector('main, #app, #root, #__next, [role="main"]'),
+    document.body?.firstElementChild,
+    document.body,
+  ].filter(el => el && el !== host && !host.contains(el));
+  const mountPoint = () => strikes < 3 ? document.documentElement
+    : (fallbackMounts()[Math.floor((strikes - 3) / 3) % Math.max(1, fallbackMounts().length)] || document.documentElement);
+  function raise() {
+    if (gaveUp) return;
+    if (!host.isConnected) mountPoint().appendChild(host);
+    try { host.hidePopover(); } catch {}
+    try { host.showPopover(); } catch {}
   }
-
-  let busyTimer = null;
-  function setBusy(busy, label = null) {
-    btn.dataset.busy = busy ? 'true' : 'false';
-    const labelEl = btn.querySelector('.mtp-label');
-    if (busyTimer) { clearInterval(busyTimer); busyTimer = null; }
-    if (busy) {
-      const startedAt = Date.now();
-      labelEl.textContent = label || 'Translating… 0s';
-      busyTimer = setInterval(() => {
-        const sec = Math.floor((Date.now() - startedAt) / 1000);
-        labelEl.textContent = `Translating… ${sec}s`;
-      }, 1000);
-    } else {
-      labelEl.textContent = label || 'Translate';
+  document.addEventListener('fullscreenchange', () => queueMicrotask(raise), true);
+  document.addEventListener('toggle', e => { if (e.target !== host) queueMicrotask(raise); }, true);
+  new MutationObserver(ms => {
+    if (ms.some(m => m.type === 'attributes' && m.target.localName === 'dialog' && m.target.open)) queueMicrotask(raise);
+    if (host.isConnected || gaveUp || (!items.length && !isTop)) return;
+    const now = performance.now();
+    removals = [...removals.filter(t => now - t < 2000), now];
+    strikes++;
+    if (removals.length < 20 || !items.length) raise();
+    else {
+      // The page keeps deleting our layer even inside its own content: show the snapshot view instead.
+      gaveUp = true;
+      if (isTop) chrome.runtime.sendMessage({ action: 'open_snapshot' }).catch(() => {});
     }
+  }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['open'] });
+  if (isTop) raise();
+
+  // ------------------------------------------------------------ UI helpers
+  let toastTimer, busyTimer;
+  function showToast(message, kind = 'info', ms = 3500) {
+    if (!toast) return;
+    toast.textContent = message; toast.dataset.kind = kind; toast.dataset.visible = 'true';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.dataset.visible = 'false'; }, ms);
+  }
+  function setBusy(on) {
+    if (!btn) return;
+    btn.dataset.busy = String(on); btn.dataset.error = 'false';
+    clearInterval(busyTimer);
+    if (on) {
+      const t0 = Date.now();
+      btn.textContent = 'Translating… 0s';
+      busyTimer = setInterval(() => { btn.textContent = `Translating… ${Math.floor((Date.now() - t0) / 1000)}s`; }, 1000);
+    } else btn.textContent = 'Translate';
+  }
+  function setOriginal(on) {
+    showOriginal = on;
+    layer.classList.toggle('original', on);
+    if (compare) compare.textContent = on ? 'Show translation' : 'Show original';
+  }
+  const updateCompare = () => { if (compare) compare.hidden = items.length === 0; };
+
+  // ------------------------------------------------------------ overlays
+  const contentTags = /^(img|picture|canvas|video|svg|iframe|object|embed)$/i;
+  function snapshotAnchors() {
+    const out = [];
+    for (const el of document.querySelectorAll('img,picture,canvas,video,svg,iframe')) {
+      const r = el.getBoundingClientRect();
+      if (r.width >= 120 && r.height >= 120 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth) out.push({ el, rect: r });
+    }
+    return out;
+  }
+  function anchorFor(box, anchors) {
+    const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+    const inside = anchors.filter(a => cx >= a.rect.left && cx <= a.rect.right && cy >= a.rect.top && cy <= a.rect.bottom && a.el.isConnected)
+      .sort((a, b) => a.rect.width * a.rect.height - b.rect.width * b.rect.height);
+    if (inside.length) return inside[0];
+    const stack = document.elementsFromPoint(Math.min(innerWidth - 1, Math.max(0, cx)), Math.min(innerHeight - 1, Math.max(0, cy)))
+      .filter(el => el !== host && el !== document.documentElement && el !== document.body);
+    const el = stack.find(e => contentTags.test(e.localName)) || stack[0] || document.documentElement;
+    return { el, rect: el.getBoundingClientRect() };
+  }
+  const relTo = (box, rect) => ({ x: (box.x - rect.left) / rect.width, y: (box.y - rect.top) / rect.height, w: box.w / rect.width, h: box.h / rect.height });
+
+  function addItem(anchor, rel, result, key) {
+    if (key && items.some(i => i.key === key)) return;
+    // Drop near-duplicates on the same anchor (re-translation of an already covered bubble).
+    if (items.some(i => i.anchor === anchor && overlapRel(i.rel, rel) > 0.5)) return;
+    const el = R.createOverlay(result);
+    layer.appendChild(el);
+    items.push({ el, anchor, rel, key, w: 0, h: 0 });
+    resizeObserver.observe(anchor);
+    raise();
+    updateCompare();
+    schedule();
+  }
+  function overlapRel(a, b) {
+    const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x), h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+    return w > 0 && h > 0 ? (w * h) / Math.min(a.w * a.h, b.w * b.h) : 0;
+  }
+  function clearOverlays() {
+    for (const i of items.splice(0)) i.el.remove();
+    resizeObserver.disconnect();
+    setOriginal(false);
+    updateCompare();
   }
 
-  let errorTimer;
-  function setError(msg) {
-    btn.dataset.error = 'true';
-    btn.querySelector('.mtp-label').textContent = 'Retry';
-    showToast(msg, 'error', 6000);
-    errorTimer = setTimeout(() => {
-      btn.dataset.error = 'false';
-      btn.querySelector('.mtp-label').textContent = 'Translate';
-    }, 6000);
+  function place() {
+    const zoom = host.currentCSSZoom || 1;
+    const rects = items.map(i => (i.anchor.isConnected ? i.anchor.getBoundingClientRect() : null));
+    items.forEach((i, k) => {
+      const a = rects[k];
+      const visible = a && a.width > 0 && a.height > 0;
+      i.el.hidden = !visible;
+      if (!visible) return;
+      const left = a.left + i.rel.x * a.width, top = a.top + i.rel.y * a.height;
+      const w = i.rel.w * a.width, h = i.rel.h * a.height;
+      if (top > innerHeight + 200 || top + h < -200) { i.el.hidden = true; return; }
+      R.layout(i.el, left / zoom, top / zoom, w / zoom, h / zoom);
+      if (Math.abs(w - i.w) > 2 || Math.abs(h - i.h) > 2) { i.w = w; i.h = h; R.fitText(i.el); }
+    });
   }
-
-  // -----------------------------------------------------
-  // Translation flow
-  // -----------------------------------------------------
-  async function triggerTranslation() {
-    if (btn.dataset.busy === 'true') return;
-    clearTimeout(errorTimer);
-    btn.dataset.error = 'false';
-    setBusy(true);
-    clearOverlays();
-
-    const viewport = {
-      dpr: window.devicePixelRatio || 1, width: window.innerWidth, height: window.innerHeight,
-      x: window.scrollX, y: window.scrollY, bounds: detectContentBounds(),
+  let frame = 0, settleUntil = 0;
+  function schedule() {
+    settleUntil = performance.now() + 400;
+    if (frame) return;
+    const tick = () => {
+      frame = 0;
+      if (items.length) place();
+      if (performance.now() < settleUntil) frame = requestAnimationFrame(tick);
     };
-    const revision = layoutRevision;
-    let response;
+    frame = requestAnimationFrame(tick);
+  }
+  const resizeObserver = new ResizeObserver(schedule);
+  addEventListener('resize', schedule);
+  visualViewport?.addEventListener('resize', schedule);
+  setInterval(() => { if (items.length && !document.hidden) place(); }, 1000); // catches silent layout changes
+
+  // ------------------------------------------------------------ drawing results
+  const plausible = box => box.w >= 8 && box.h >= 8 && box.w * box.h <= innerWidth * innerHeight * 0.4 &&
+    !(box.w > innerWidth * 0.7 && box.h > innerHeight * 0.7);
+
+  // A result from a viewport capture: image px → CSS px at capture time → anchored element.
+  async function drawCaptureResult(r, req) {
+    if (![r.x, r.y, r.w, r.h].every(Number.isFinite)) return;
+    const box = { x: r.x / req.dpr, y: r.y / req.dpr, w: r.w / req.dpr, h: r.h / req.dpr };
+    if (!plausible(box)) return;
+    const key = `c${req.requestId}:${r.id ?? `${r.x},${r.y}`}`;
+    if (req.drawn.has(key)) return;
+    req.drawn.add(key);
+    const a = anchorFor(box, req.anchors);
+    if (isTop && a.el.localName === 'iframe' && a.el.src) {
+      const frameBox = { x: box.x - a.rect.left - a.el.clientLeft, y: box.y - a.rect.top - a.el.clientTop, w: box.w, h: box.h };
+      const ok = await chrome.runtime.sendMessage({ action: 'draw_in_frame', src: a.el.src, box: frameBox, result: r, key }).catch(() => null);
+      if (ok?.ok) return;
+    }
+    addItem(a.el, relTo(box, a.rect), r, key);
+  }
+
+  // A result from a source image: natural image px → fractions of the <img>.
+  function drawImageResult(img, r) {
+    if (!img?.isConnected || !img.naturalWidth) return;
+    addItem(img, { x: r.x / img.naturalWidth, y: r.y / img.naturalHeight, w: r.w / img.naturalWidth, h: r.h / img.naturalHeight }, r, `i:${img.dataset.mtpKey}:${r.id}`);
+  }
+
+  // ------------------------------------------------------------ source images (read-ahead)
+  const imageState = new WeakMap(), imageByKey = new Map(), failedHosts = new Set();
+  let sourceUnsupported = false;
+  function isMangaImage(img) {
+    if (!img.complete || img.naturalWidth < 400 || img.naturalHeight < 400) return false;
+    const r = img.getBoundingClientRect();
+    if (r.width < 200 || r.height < 200) return false;
+    try { const u = new URL(img.currentSrc || img.src); return /^https?:$/.test(u.protocol) && !failedHosts.has(u.host); } catch { return false; }
+  }
+  function translateImage(img, priority = 0) {
+    if (sourceUnsupported) return Promise.resolve(false);
+    const state = imageState.get(img);
+    if (state) return state;
+    const key = img.dataset.mtpKey || `${Date.now().toString(36)}${++imageSeq}`;
+    img.dataset.mtpKey = key;
+    imageByKey.set(key, img);
+    const url = img.currentSrc || img.src;
+    const promise = chrome.runtime.sendMessage({ action: 'translate_source_image', url, width: img.naturalWidth, height: img.naturalHeight, imageKey: key, priority })
+      .then(res => {
+        if (!res || res.error) {
+          if (res?.error === 'unsupported') sourceUnsupported = true;
+          else try { failedHosts.add(new URL(url).host); } catch {}
+          imageState.delete(img);
+          return false;
+        }
+        for (const r of res.results || []) drawImageResult(img, r);
+        return true;
+      })
+      .catch(() => { imageState.delete(img); return false; });
+    imageState.set(img, promise);
+    return promise;
+  }
+  const readAhead = new IntersectionObserver(entries => {
+    if (!(autoMode || siteAuto)) return;
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      const img = e.target, priority = Math.max(0, e.boundingClientRect.top);
+      // Lazy-loaded images are often still empty when they come near the screen.
+      if (!img.complete) img.addEventListener('load', () => { if (isMangaImage(img)) translateImage(img, priority); }, { once: true });
+      else if (isMangaImage(img)) translateImage(img, priority);
+    }
+  }, { rootMargin: '0px 0px 150% 0px' });
+  const observed = new WeakSet();
+  function observeImages() {
+    for (const img of document.images) if (!observed.has(img)) { observed.add(img); readAhead.observe(img); }
+  }
+
+  // ------------------------------------------------------------ translation
+  const toImagePx = (r, dpr) => ({ x: r.left * dpr, y: r.top * dpr, w: r.width * dpr, h: r.height * dpr });
+
+  async function translate({ incremental = false } = {}) {
+    if (!isTop) return;
+    if (busy) { if (incremental) pendingAuto = true; else pendingManual = true; return; }
+    busy = true; setBusy(true);
+    if (!incremental) clearOverlays();
+    const dpr = window.devicePixelRatio || 1;
+    const req = current = { requestId: ++requestSeq, dpr, anchors: [], drawn: new Set() };
     try {
       if (sampleMode) {
-        const results = [...document.querySelectorAll('[data-translation]')].map(bubble => {
-          const rect = bubble.getBoundingClientRect();
-          return { x: rect.x * viewport.dpr, y: rect.y * viewport.dpr,
-            w: rect.width * viewport.dpr, h: rect.height * viewport.dpr, text: bubble.dataset.translation };
+        const results = [...document.querySelectorAll('[data-translation]')].map((b, id) => {
+          const r = b.getBoundingClientRect();
+          return { id, x: r.x * dpr, y: r.y * dpr, w: r.width * dpr, h: r.height * dpr, text: b.dataset.translation, shape: 'ellipse', automatic: true };
         });
-        response = { results };
-      } else {
-        response = await chrome.runtime.sendMessage({ action: 'capture_and_translate' });
-      }
-      if (layoutRevision !== revision) {
-        showToast('Page moved or resized. Click Translate again.');
+        req.anchors = snapshotAnchors();
+        for (const r of results) await drawCaptureResult(r, req);
+        showToast(`Translated ${results.length} text regions.`);
         return;
       }
-      if (!response || response.error) throw new Error(response?.error || 'No response from the extension.');
-      drawOverlays(response.results || [], viewport);
-      const count = overlays.length;
-      showToast(count ? `Translated ${count} text region${count === 1 ? '' : 's'}.` :
-        'No usable text regions in the visible area.');
+      // 1. Visible manga images through the source-image path (exact pixels, cached, no capture).
+      const visible = [...document.images].filter(img => { const r = img.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight && isMangaImage(img); });
+      const handled = (await Promise.all(visible.map(img => translateImage(img, 0).then(ok => (ok ? img : null))))).filter(Boolean);
+      // 2. Everything else through a viewport capture, skipping translated areas and our own controls.
+      const zones = [...handled.map(img => img.getBoundingClientRect()),
+        ...items.filter(i => !i.el.hidden).map(i => i.el.getBoundingClientRect()),
+        ...(btn ? [btn.parentElement.getBoundingClientRect()] : [])];
+      const coveredByImages = handled.reduce((s, img) => { const r = img.getBoundingClientRect(); return s + Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0)) * Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0)); }, 0);
+      if (!handled.length || coveredByImages < innerWidth * innerHeight * 0.5) {
+        // Let removed overlays leave the screen before Chrome grabs the frame.
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        req.anchors = snapshotAnchors();
+        const res = await chrome.runtime.sendMessage({ action: 'capture_and_translate', requestId: req.requestId, dpr, exclude: zones.map(z => toImagePx(z, dpr)) });
+        if (res?.error === 'busy') { pendingAuto = true; return; }
+        if (!res || res.error) throw new Error(res?.error || 'No response from the extension.');
+        lastRun = { captured: res.results?.length || 0, excluded: zones.length };
+        for (const r of res.results || []) await drawCaptureResult(r, req);
+      }
+      if (!incremental) showToast(items.length ? `Translated ${items.length} text region${items.length === 1 ? '' : 's'}.` : 'No usable text regions in the visible area.');
     } catch (err) {
-      setBusy(false);
-      setError(err.message);
-      return;
+      if (btn) { btn.dataset.error = 'true'; }
+      lastRun = { error: err.message || String(err) };
+      showToast(err.message || String(err), 'error', 6000);
     } finally {
-      if (btn.dataset.error !== 'true') setBusy(false);
-      if (translateAfterScroll) {
-        translateAfterScroll = false;
-        if (autoMode) scheduleScrollTranslation();
-      }
+      busy = false;
+      clearInterval(busyTimer);
+      if (btn) { btn.dataset.busy = 'false'; btn.textContent = btn.dataset.error === 'true' ? 'Retry' : 'Translate'; }
+      if (pendingManual) { pendingManual = pendingAuto = false; setTimeout(() => translate({ incremental: false })); }
+      else if (pendingAuto) { pendingAuto = false; scheduleAuto(); }
     }
   }
 
-  btn.addEventListener('click', triggerTranslation);
+  // Auto mode: translate newly visible content after any scroll container settles.
+  let autoTimer;
+  function scheduleAuto(delay = 350) {
+    if (!(autoMode || siteAuto) || !isTop) return;
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(() => translate({ incremental: true }), delay);
+  }
+  document.addEventListener('scroll', () => { schedule(); scheduleAuto(); }, { capture: true, passive: true });
+  document.addEventListener('scrollend', () => scheduleAuto(60), { capture: true, passive: true });
 
-  // Allow popup or background to trigger translation
-  chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-    if (request.action === 'page_translation_status') {
-      if (btn.dataset.busy === 'true') showToast(request.message, 'info', 10000);
-      return;
-    }
-    if (request.action === 'trigger_from_popup') {
-      triggerTranslation();
-      sendResponse({ ok: true });
-    } else if (request.action === 'clear_overlays') {
-      clearOverlays();
-      sendResponse({ ok: true });
-    }
-    return true;
-  });
-
-  // -----------------------------------------------------
-  // Overlay drawing
-  // Coordinates from the provider are in IMAGE pixels (PNG-space).
-  // captureVisibleTab returns a PNG scaled by devicePixelRatio.
-  // We convert: cssPixels = imagePixels / dpr, then add the scroll
-  // offset captured at the moment of capture (NOT current scroll).
-  // -----------------------------------------------------
-  function drawOverlays(results, viewport) {
-    clearOverlays();
-    if (!results || results.length === 0) return;
-
-    const { dpr, bounds: contentBounds } = viewport;
-    for (const item of results) {
-      if (![item.x, item.y, item.w, item.h].every(Number.isFinite)) continue;
-      const left = Math.max(0, item.x / dpr);
-      const top = Math.max(0, item.y / dpr);
-      let cssWidth = Math.min(viewport.width, (item.x + item.w) / dpr) - left;
-      const cssHeight = Math.min(viewport.height, (item.y + item.h) / dpr) - top;
-      let cssLeft = left + viewport.x;
-      const cssTop = top + viewport.y;
-
-      // Skip bogus boxes. Two failure modes to reject:
-      //   1. Tiny / zero-size boxes (model hallucination).
-      //   2. Full-image fallback boxes — both width AND height huge.
-      // Long vertical recap columns are tall but very narrow, so we use AND
-      // (not OR) on the dimension check to let them through.
-      if (cssWidth < 8 || cssHeight < 8) continue;
-      if (cssWidth > viewport.width * 0.7 && cssHeight > viewport.height * 0.7) {
-        console.warn('[MangaTranslator] skipping full-page overlay', cssWidth, cssHeight);
-        continue;
+  // ------------------------------------------------------------ messages + settings
+  chrome.runtime.onMessage.addListener((request, _sender, respond) => {
+    switch (request.action) {
+      case 'page_translation_status':
+        if (busy) showToast(request.message, 'info', 10000);
+        return;
+      case 'page_translation_result':
+        if (request.imageKey) drawImageResult(imageByKey.get(request.imageKey), request.result);
+        else if (current && request.requestId === current.requestId) drawCaptureResult(request.result, current);
+        return;
+      case 'draw_in_frame': {
+        if (isTop || request.src !== location.href) return;
+        const a = anchorFor(request.box, snapshotAnchors());
+        addItem(a.el, relTo(request.box, a.rect), request.result, request.key);
+        respond({ ok: true });
+        return;
       }
-      const viewportArea = viewport.width * viewport.height;
-      if (cssWidth * cssHeight > viewportArea * 0.4) {
-        console.warn('[MangaTranslator] skipping overlay covering >40% of viewport');
-        continue;
-      }
-
-      // Nudge boxes that land in the dark page margins (Gemini left/right spatial bias).
-      // Only correct if the misplacement is small (<= 100px) — large errors are skipped.
-      if (contentBounds) {
-        const TOL = 100;
-        if (cssLeft < contentBounds.left && contentBounds.left - cssLeft <= TOL) {
-          cssLeft = contentBounds.left;
-        }
-        const cssRight = cssLeft + cssWidth;
-        if (cssRight > contentBounds.right && cssRight - contentBounds.right <= TOL) {
-          if (cssLeft >= contentBounds.right) {
-            cssLeft = Math.max(contentBounds.left, contentBounds.right - cssWidth);
-          } else {
-            cssWidth = contentBounds.right - cssLeft;
-          }
-        }
-      }
-
-      const el = document.createElement('div');
-      el.className = 'mtp-overlay';
-      if (item.automatic) {
-        el.classList.add('mtp-automatic');
-        cssWidth = Math.max(cssWidth, Math.min(160, viewport.width + viewport.x - cssLeft));
-      }
-      el.textContent = item.text;
-      el.style.left = `${cssLeft}px`;
-      el.style.top = `${cssTop}px`;
-      el.style.width = `${cssWidth}px`;
-      el.style.height = `${cssHeight}px`;
-      el.style.fontSize = `${computeFontSize(cssWidth, cssHeight, item.text)}px`;
-      el.title = item.text; // tooltip for long text
-      document.documentElement.appendChild(el);
-      overlays.push(el);
-    }
-    compare.hidden = overlays.length === 0;
-  }
-
-  function clearOverlays() {
-    for (const el of overlays.splice(0)) el.remove();
-    compare.hidden = true;
-    compare.textContent = 'Show original';
-  }
-
-  /**
-   * Heuristic: pick a font size that fits the text in the bubble.
-   * Manga bubbles are usually wider than tall; we estimate area-per-character.
-   */
-  function computeFontSize(width, height, text) {
-    const len = Math.max(1, text.length);
-    const area = width * height;
-    // 0.5x area-per-char ≈ reasonable readability budget
-    const px = Math.sqrt((area * 0.45) / len);
-    return Math.max(10, Math.min(22, Math.round(px)));
-  }
-
-  // Returns the document-coordinate left/right bounds of large images currently
-  // in the viewport. Used to detect the manga content area vs. dark page margins.
-  function detectContentBounds() {
-    const large = [...document.querySelectorAll('img')].filter((img) => {
-      const r = img.getBoundingClientRect();
-      return r.width > 100 && r.height > 100 && r.top < window.innerHeight && r.bottom > 0;
-    });
-    if (!large.length) return null;
-    let minLeft = Infinity, maxRight = -Infinity;
-    for (const img of large) {
-      const r = img.getBoundingClientRect();
-      minLeft = Math.min(minLeft, r.left + window.scrollX);
-      maxRight = Math.max(maxRight, r.right + window.scrollX);
-    }
-    return Number.isFinite(minLeft) ? { left: minLeft, right: maxRight } : null;
-  }
-
-  // -----------------------------------------------------
-  // Auto-mode: re-translate after scrolling stops
-  // -----------------------------------------------------
-  function scheduleScrollTranslation() {
-    clearTimeout(scrollTimer);
-    scrollTimer = setTimeout(() => {
-      if (!autoMode) return;
-      if (btn.dataset.busy === 'true') translateAfterScroll = true;
-      else triggerTranslation();
-    }, 1500);
-  }
-
-  window.addEventListener('scroll', () => {
-    layoutRevision++;
-    if (autoMode) scheduleScrollTranslation();
-  }, { passive: true });
-
-  // Reposition overlays on resize (re-fitting to new viewport without re-translating)
-  window.addEventListener('resize', () => {
-    // Resize invalidates pixel-space coordinates; safer to clear and let
-    // the user re-translate.
-    layoutRevision++;
-    if (overlays.length > 0) {
-      clearOverlays();
-      showToast('Window resized — click Translate to redraw.', 'info', 2500);
+      case 'trigger_from_popup': translate({ incremental: false }); respond?.({ ok: true }); return;
+      case 'clear_overlays': clearOverlays(); respond?.({ ok: true }); return;
+      case 'toggle_original': setOriginal(!showOriginal); respond?.({ ok: true, showOriginal }); return;
+      case 'auto_changed': loadSettings(); respond?.({ ok: true }); return;
+      case 'overlay_state': respond({ ok: true, items: items.length, showOriginal, busy: busy || pendingManual, lastRun,
+        debug: request.debug ? items.map(i => ({ tag: i.anchor.localName, cls: i.anchor.className?.baseVal ?? i.anchor.className, rel: i.rel, box: i.el.style.cssText })) : undefined }); return;
     }
   });
 
-  // Log build info so the user can verify from DevTools which build is running
-  fetch(chrome.runtime.getURL('build-info.json'))
-    .then((r) => r.json())
-    .then((info) => {
-      console.log(
-        `%c[MangaTranslator] content script ready · v${info.version} · build ${info.buildId}`,
-        'color:#2563eb;font-weight:bold',
-      );
-      btn.title = `Manga Translator Pro v${info.version}\nBuild: ${info.buildId}`;
-    })
-    .catch(() => console.log('[MangaTranslator] content script ready (build-info unavailable)'));
+  async function loadSettings() {
+    const { autoMode: a = false, autoSites = [] } = await chrome.storage.local.get(['autoMode', 'autoSites']);
+    const wasAuto = autoMode || siteAuto;
+    autoMode = !!a;
+    siteAuto = autoSites.includes(location.origin);
+    if (autoMode || siteAuto) observeImages();
+    if (!wasAuto && (autoMode || siteAuto)) scheduleAuto(800);
+  }
+  chrome.storage.onChanged.addListener(changes => { if (changes.autoMode || changes.autoSites) loadSettings(); });
+  loadSettings();
+  if (isTop) new MutationObserver(() => { if (autoMode || siteAuto) observeImages(); }).observe(document.documentElement, { childList: true, subtree: true });
+
+  fetch(chrome.runtime.getURL('build-info.json')).then(r => r.json()).then(info => {
+    if (isTop) console.log(`%c[MangaTranslator] ready · v${info.version} · build ${info.buildId}`, 'color:#2563eb;font-weight:bold');
+    if (btn) btn.title = `Manga Translator Pro v${info.version}\nBuild: ${info.buildId}\nShortcut: Alt+Shift+T`;
+  }).catch(() => {});
 })();
