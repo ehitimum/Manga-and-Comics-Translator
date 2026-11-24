@@ -1,14 +1,16 @@
 # Manga Translator Pro
 
-## Test v0.3.2
+## Test v0.4.0 beta
 
-Download the [extension ZIP](https://github.com/ehitimum/Manga-and-Comics-Translator/releases/tag/v0.3.2), extract it and load the folder containing `manifest.json` from **chrome://extensions → Developer mode → Load unpacked**. If you loaded the repository's `extension` folder earlier, click **Reload** for Manga Translator Pro.
+Download the [extension ZIP](https://github.com/ehitimum/Manga-and-Comics-Translator/releases/tag/v0.4.0-beta.1). Extract it and select the folder containing `manifest.json` under **chrome://extensions → Developer mode → Load unpacked**. From a source checkout, run `npm ci` and `npm run build` before loading or reloading `extension`.
 
-1. Open the toolbar popup and choose **Translate typed text**. Enter **ありがとう** and click **Translate to English**. Expect “Thank you.” Ten common phrases have a labeled built-in translation when the Chrome language pack is missing. Other phrases use Chrome’s on-demand language pack. If it takes too long or is unavailable, **Send this text to Google Translate** opens the online translation.
-2. For image text, open a manga page on HTTP or HTTPS, choose **Read a bubble**, and drag around a single block of Japanese in the screenshot. Choose its writing direction and click **Read selection**. Correct the recognized Japanese if needed, then translate. Repeat for another bubble in the same capture.
-3. New installations and upgrades from Gemini with an empty key use **Chrome Translator**. If a different provider is configured, select Chrome Translator in Settings to use the bubble reader. Gemini, Ollama and FastAPI retain their automatic overlay workflow.
+1. Open a Japanese manga page on HTTP or HTTPS. Choose **Chrome Translator** in Settings if you previously configured another provider.
+2. Open the extension popup and click **Translate page**. Stay on the manga tab while the extension detects and reads the visible bubbles. English appears over the original page.
+3. Use **Show original** to compare, or enable **Auto-translate on scroll** to process the next viewport after scrolling stops.
 
-The reader runs Tesseract.js in local WebAssembly. It downloads the selected Japanese OCR weights on request and verifies their size and SHA-256 before caching. Horizontal and vertical data are 2.47 MB and 3.04 MB respectively. **Remove downloaded OCR models** clears those files. Chrome separately manages its translation language packs. The online fallback sends only the text when you open the link. [Chrome Translator API](https://developer.chrome.com/docs/ai/translator-api) · [OCR model source and Apache 2.0 license](https://github.com/tesseract-ocr/tessdata_fast/tree/87416418657359cb625c412a48b6e1d6d41c29bd)
+The default pipeline uses local bubble detection and horizontal and vertical Japanese OCR. If Chrome’s Japanese-to-English translator is ready, the extension uses it. Otherwise it downloads a quantized OPUS-MT model and runs it locally with ONNX Runtime WASM. Allow about 120 MB for the first fallback run, including OCR models. The default pipeline keeps manga pixels and recognized text on the device. Existing configured providers retain their own processing paths. [Chrome Translator API](https://developer.chrome.com/docs/ai/translator-api) · [OPUS-MT model and license](https://huggingface.co/Helsinki-NLP/opus-mt-ja-en)
+
+This beta uses viewport capture and heuristic speech-bubble detection. Stylized lettering, clipped bubbles and textured art can reduce recall. The **Translate typed text** tool remains available in the popup.
 
 The [GitHub wiki](https://github.com/ehitimum/Manga-and-Comics-Translator/wiki/Development-Roadmap) and [repository roadmap](docs/Development-Roadmap.md) track release history and phase acceptance checks.
 

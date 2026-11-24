@@ -1,4 +1,5 @@
-import { installModel, ocrCache } from './models.js';
+import { ocrCache } from './models.js';
+import { createJapaneseWorker } from '../engine/ocr.js';
 import { translateJapanese } from '../providers/browser.js';
 
 const el = id => document.getElementById(id);
@@ -62,13 +63,7 @@ el('recognize').onclick = async () => {
   try {
     const code = el('direction').value;
     status('Preparing OCR model…');
-    await installModel(code);
-    const url = path => chrome.runtime.getURL('reader/' + path);
-    worker = await Tesseract.createWorker(code, 1, {
-      workerPath: url('vendor/worker.min.js'), workerBlobURL: false,
-      corePath: url('vendor/tesseract-core-lstm.wasm.js'),
-      langPath: url('data'), gzip:false, cacheMethod:'none',
-    });
+    worker = await createJapaneseWorker(code);
     await worker.setParameters({ tessedit_pageseg_mode: code === 'jpn_vert' ? '5' : '6' });
     status('Reading selection…');
     const {data} = await worker.recognize(image, {rectangle: crop});

@@ -40,11 +40,8 @@ async function loadSettingsAndProbe() {
   autoModeToggle.checked = autoMode;
 
   if (provider === 'browser') {
-    translateBtn.textContent = 'Read a bubble';
-    autoModeToggle.closest('label').hidden = true;
-    autoModeToggle.closest('label').style.display = 'none';
-    setStatus('ok', 'Japanese → English');
-    hint.textContent = 'Open a manga page and select one bubble from a screenshot. You can also type Japanese text.';
+    setStatus('ok', 'Japanese → English · On this device');
+    hint.textContent = 'Translate the visible manga without an API key. First use may download about 120 MB.';
     return;
   }
   setStatus('', 'Checking provider…');
@@ -84,35 +81,17 @@ translateBtn.addEventListener('click', async () => {
       throw new Error("Can't translate this page (not a regular http/https page).");
     }
 
-    const { provider = 'browser' } = await chrome.storage.local.get('provider');
-    if (provider === 'browser') {
-      const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-      const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
-      if (active?.id !== tab.id) throw new Error('The active page changed. Try again.');
-      const key = 'capture-' + crypto.randomUUID();
-      await chrome.storage.session.set({ [key]: screenshot });
-      try {
-        await chrome.tabs.create({ url: chrome.runtime.getURL('reader/index.html#' + key) });
-      } catch (err) {
-        await chrome.storage.session.remove(key);
-        throw err;
-      }
-      window.close();
-      return;
-    }
     // Inject content script on demand, then trigger translation
     const inj = await chrome.runtime.sendMessage({ action: 'inject_content_script', tabId: tab.id });
     if (!inj?.ok) throw new Error(inj?.error || 'Failed to inject content script');
 
     // Tell the content script to start (also works if it's the first time)
-    chrome.tabs.sendMessage(tab.id, { action: 'trigger_from_popup' }, () => {
-      // We don't wait for the result — content script handles its own UI.
-      window.close();
-    });
+    await chrome.tabs.sendMessage(tab.id, { action: 'trigger_from_popup' });
+    window.close();
   } catch (err) {
     setStatus('err', err.message);
     translateBtn.disabled = false;
-    translateBtn.textContent = providerLabel.textContent === PROVIDER_LABELS.browser ? 'Read a bubble' : 'Translate page';
+    translateBtn.textContent = 'Translate page';
   }
 });
 

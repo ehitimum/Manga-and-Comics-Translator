@@ -14,7 +14,7 @@ const PROVIDERS: ProviderOption[] = [
     id: 'browser',
     name: 'Chrome Translator',
     tagline: 'Japanese to English',
-    features: ['No API key', 'Select a bubble or paste text', 'Runs in the browser'],
+    features: ['No API key', 'Automatic on-page overlays', 'Runs in the browser'],
     icon: '文',
   },
   {

@@ -192,7 +192,6 @@ uvicorn app:app --port 8001`}
           )}
         </AnimatePresence>
 
-        {settings.provider !== 'browser' && (
         <motion.section
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -211,8 +210,6 @@ uvicorn app:app --port 8001`}
           </Card>
         </motion.section>
 
-        )}
-        {settings.provider === 'browser' ? <p>Open the toolbar popup and choose Read a bubble to select Japanese text from a screenshot, or Translate typed text to enter a phrase.</p> : (
         <motion.section
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -241,9 +238,8 @@ uvicorn app:app --port 8001`}
           </Card>
         </motion.section>
 
-        )}
         <p className="pt-4 text-center text-xs text-[var(--color-muted)]">
-          Manga Translator Pro · v{chrome.runtime.getManifest().version}
+          Manga Translator Pro · v{chrome.runtime.getManifest().version_name || chrome.runtime.getManifest().version}
         </p>
       </div>
     </div>

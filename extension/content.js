@@ -13,6 +13,7 @@
   // -----------------------------------------------------
   let autoMode = false;
   let scrollTimer = null;
+  let translateAfterScroll = false;
   const overlays = [];
   let layoutRevision = 0;
   const sampleMode = location.href === chrome.runtime.getURL('sample.html');
@@ -89,6 +90,14 @@
         box-sizing: border-box;
         pointer-events: auto;
         cursor: text;
+      }
+
+      .mtp-automatic {
+        border: 0;
+        border-radius: 4px;
+        padding: 2px 5px;
+        min-height: 24px;
+        overflow-wrap: anywhere;
       }
 
       #mtp-toast {
@@ -222,6 +231,10 @@
       return;
     } finally {
       if (btn.dataset.error !== 'true') setBusy(false);
+      if (translateAfterScroll) {
+        translateAfterScroll = false;
+        if (autoMode) scheduleScrollTranslation();
+      }
     }
   }
 
@@ -229,6 +242,10 @@
 
   // Allow popup or background to trigger translation
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+    if (request.action === 'page_translation_status') {
+      if (btn.dataset.busy === 'true') showToast(request.message, 'info', 10000);
+      return;
+    }
     if (request.action === 'trigger_from_popup') {
       triggerTranslation();
       sendResponse({ ok: true });
@@ -295,6 +312,10 @@
 
       const el = document.createElement('div');
       el.className = 'mtp-overlay';
+      if (item.automatic) {
+        el.classList.add('mtp-automatic');
+        cssWidth = Math.max(cssWidth, Math.min(160, viewport.width + viewport.x - cssLeft));
+      }
       el.textContent = item.text;
       el.style.left = `${cssLeft}px`;
       el.style.top = `${cssTop}px`;
@@ -346,11 +367,18 @@
   // -----------------------------------------------------
   // Auto-mode: re-translate after scrolling stops
   // -----------------------------------------------------
+  function scheduleScrollTranslation() {
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => {
+      if (!autoMode) return;
+      if (btn.dataset.busy === 'true') translateAfterScroll = true;
+      else triggerTranslation();
+    }, 1500);
+  }
+
   window.addEventListener('scroll', () => {
     layoutRevision++;
-    if (!autoMode) return;
-    clearTimeout(scrollTimer);
-    scrollTimer = setTimeout(triggerTranslation, 1500);
+    if (autoMode) scheduleScrollTranslation();
   }, { passive: true });
 
   // Reposition overlays on resize (re-fitting to new viewport without re-translating)

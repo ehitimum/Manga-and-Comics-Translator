@@ -49,6 +49,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       handleCaptureAndTranslate(sender, sendResponse);
       return true; // async
 
+    case 'page_translation_status':
+      if (sender.url === chrome.runtime.getURL('engine/automatic.html')) {
+        chrome.tabs.sendMessage(request.tabId, { action: request.action, message: request.message }).catch(() => {});
+      }
+      return;
+
     case 'test_connection':
       handleTestConnection(request.provider, sendResponse);
       return true;
@@ -86,6 +92,10 @@ async function handleCaptureAndTranslate(sender, sendResponse) {
     const base64Image = dataUrl.split(',')[1];
 
     // Route to provider
+    if (settings.provider === 'browser') {
+      sendResponse(await translateInBrowser(dataUrl, tab.id));
+      return;
+    }
     const results = await callProviderWithRetry(settings, base64Image);
 
     sendResponse({ results });
@@ -95,6 +105,20 @@ async function handleCaptureAndTranslate(sender, sendResponse) {
   } finally {
     isProcessing = false;
   }
+}
+
+async function translateInBrowser(image, tabId) {
+  const path = 'engine/automatic.html';
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT'], documentUrls: [chrome.runtime.getURL(path)],
+  });
+  if (!contexts.length) {
+    await chrome.offscreen.createDocument({
+      url: path, reasons: ['WORKERS'],
+      justification: 'Run local OCR and translation workers on the manga screenshot.',
+    });
+  }
+  return chrome.runtime.sendMessage({ action: 'translate_captured_page', image, tabId });
 }
 
 async function callProviderWithRetry(settings, base64Image, maxAttempts = 3) {

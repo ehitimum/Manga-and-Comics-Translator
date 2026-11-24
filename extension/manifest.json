@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Manga Translator Pro",
-  "version": "0.3.2",
-  "description": "Read Japanese manga bubbles with local OCR and key-free translation in Chrome.",
-  "permissions": ["activeTab", "storage", "scripting"],
+  "version": "0.3.99.1",
+  "version_name": "0.4.0-beta.1",
+  "description": "Automatically translate visible Japanese manga in place with local OCR and translation.",
+  "permissions": ["activeTab", "storage", "scripting", "offscreen"],
   "optional_host_permissions": ["*://*/*"],
   "host_permissions": [
     "http://localhost/*",

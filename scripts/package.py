@@ -7,7 +7,8 @@ root = Path(__file__).resolve().parents[1]
 extension = root / "extension"
 version = json.loads((root / "package.json").read_text())["version"]
 for name in ("manifest.json", "build-info.json"):
-    if json.loads((extension / name).read_text())["version"] != version:
+    metadata = json.loads((extension / name).read_text())
+    if metadata.get("version_name", metadata["version"]) != version:
         raise SystemExit(f"Version mismatch in {name}")
 
 archive = root / "dist" / f"manga-translator-pro-{version}.zip"
