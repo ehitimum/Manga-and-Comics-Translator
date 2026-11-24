@@ -1,13 +1,29 @@
 const japanese = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/gu;
 
-export function extractRegions(data, minimumConfidence = 45) {
+export const japaneseCount = text => text.match(japanese)?.length || 0;
+
+// Paragraphs from Tesseract's block output. A single character (え？, は？) is kept when the
+// crop is a whole bubble and Tesseract is confident; otherwise two characters are required.
+export function extractRegions(data, minimumConfidence = 45, { singleCharConfidence = 75 } = {}) {
   return (data.blocks || []).flatMap(block => block.paragraphs || []).flatMap(paragraph => {
     const text = paragraph.text.trim().replace(/\s+/gu, '');
     const { x0, y0, x1, y1 } = paragraph.bbox;
-    if ((text.match(japanese)?.length || 0) < 2 || paragraph.confidence < minimumConfidence ||
-        x1 - x0 < 8 || y1 - y0 < 8) return [];
+    const chars = japaneseCount(text);
+    if (!chars || (chars < 2 && paragraph.confidence < singleCharConfidence) ||
+        paragraph.confidence < minimumConfidence || x1 - x0 < 8 || y1 - y0 < 8) return [];
     return [{ x: x0, y: y0, w: x1 - x0, h: y1 - y0, text, confidence: paragraph.confidence }];
   });
+}
+
+// Join the paragraphs of one bubble in reading order: vertical columns right to left, lines top to bottom.
+export function bubbleText(regions, vertical) {
+  if (!regions.length) return null;
+  const ordered = [...regions].sort((a, b) => vertical ? (b.x - a.x) || (a.y - b.y) : (a.y - b.y) || (a.x - b.x));
+  const weight = ordered.reduce((s, r) => s + r.text.length, 0);
+  return {
+    text: ordered.map(r => r.text).join(''),
+    confidence: ordered.reduce((s, r) => s + r.confidence * r.text.length, 0) / weight,
+  };
 }
 
 function overlap(a, b) {
