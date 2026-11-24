@@ -59,11 +59,18 @@ async function handleCaptureAndTranslate(sender, sendResponse) {
   isProcessing = true;
 
   try {
-    const tabId = sender.tab?.id;
+    const tab = sender.tab;
+    if (!tab) throw new Error('Open a manga tab to capture it.');
+    async function verifyActiveTab() {
+      const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+      if (active?.id !== tab.id) throw new Error('Return to the manga tab and click Translate.');
+    }
     const settings = await getSettings();
 
     // Capture visible tab as PNG
-    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+    await verifyActiveTab();
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    await verifyActiveTab();
     const base64Image = dataUrl.split(',')[1];
 
     // Route to provider

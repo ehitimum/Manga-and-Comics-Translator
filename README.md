@@ -4,6 +4,14 @@ A Chrome extension that translates Japanese manga into English in-place on any w
 
 Supports three translation providers: **Gemini API** (cloud, free, recommended), **Ollama** (local, offline), and a **Local FastAPI server** (specialist manga-OCR pipeline).
 
+## Test v0.3.1
+
+Download the [extension ZIP](https://github.com/ehitimum/Manga-and-Comics-Translator/releases/tag/v0.3.1), extract it, open `chrome://extensions`, enable **Developer mode**, and select the extracted folder with **Load unpacked**. From a checkout, load the `extension` directory directly.
+
+Open the toolbar popup and select **Try sample page**. Click **Translate** to see two English speech bubbles, then **Show original** and **Show translation** to compare. The sample uses preset text. For a live test, configure a provider in **Settings**, open an HTTP(S) manga page and click **Translate page**. Keep the viewport still until results appear.
+
+The [GitHub wiki](https://github.com/ehitimum/Manga-and-Comics-Translator/wiki/Development-Roadmap) and [repository roadmap](docs/Development-Roadmap.md) track release history and phase acceptance checks.
+
 ---
 
 ## Architecture

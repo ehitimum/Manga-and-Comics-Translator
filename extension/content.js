@@ -13,9 +13,9 @@
   // -----------------------------------------------------
   let autoMode = false;
   let scrollTimer = null;
-  let lastResults = [];
-  let lastDpr = window.devicePixelRatio || 1;
-  let lastViewportScroll = { x: window.scrollX, y: window.scrollY };
+  const overlays = [];
+  let layoutRevision = 0;
+  const sampleMode = location.href === chrome.runtime.getURL('sample.html');
 
   chrome.storage.local.get(['autoMode'], (r) => { autoMode = !!r.autoMode; });
   chrome.storage.onChanged.addListener((changes) => {
@@ -93,7 +93,7 @@
 
       #mtp-toast {
         position: fixed;
-        bottom: 80px;
+        bottom: 118px;
         right: 24px;
         z-index: 2147483647;
         max-width: 320px;
@@ -119,10 +119,24 @@
   // -----------------------------------------------------
   // UI: floating button + toast
   // -----------------------------------------------------
-  const btn = document.createElement('div');
+  const btn = document.createElement('button');
+  btn.type = 'button';
   btn.id = 'mtp-btn';
   btn.innerHTML = `<span class="mtp-dot"></span><span class="mtp-label">Translate</span>`;
   document.body.appendChild(btn);
+
+  const compare = document.createElement('button');
+  compare.type = 'button';
+  compare.id = 'mtp-compare';
+  compare.textContent = 'Show original';
+  compare.hidden = true;
+  compare.style.cssText = 'position:fixed;right:24px;bottom:70px;z-index:2147483646;padding:8px 14px;background:white;color:#172033;border:1px solid #777;border-radius:12px;cursor:pointer';
+  document.body.appendChild(compare);
+  compare.addEventListener('click', () => {
+    const showOriginal = compare.textContent === 'Show original';
+    for (const overlay of overlays) overlay.style.display = showOriginal ? 'none' : 'flex';
+    compare.textContent = showOriginal ? 'Show translation' : 'Show original';
+  });
 
   const toast = document.createElement('div');
   toast.id = 'mtp-toast';
@@ -155,11 +169,12 @@
     }
   }
 
+  let errorTimer;
   function setError(msg) {
     btn.dataset.error = 'true';
     btn.querySelector('.mtp-label').textContent = 'Retry';
     showToast(msg, 'error', 6000);
-    setTimeout(() => {
+    errorTimer = setTimeout(() => {
       btn.dataset.error = 'false';
       btn.querySelector('.mtp-label').textContent = 'Translate';
     }, 6000);
@@ -170,46 +185,44 @@
   // -----------------------------------------------------
   async function triggerTranslation() {
     if (btn.dataset.busy === 'true') return;
+    clearTimeout(errorTimer);
+    btn.dataset.error = 'false';
     setBusy(true);
     clearOverlays();
 
-    lastDpr = window.devicePixelRatio || 1;
-    lastViewportScroll = { x: window.scrollX, y: window.scrollY };
-
-    chrome.runtime.sendMessage({ action: 'capture_and_translate' }, (response) => {
-      setBusy(false);
-      if (chrome.runtime.lastError) {
-        setError(chrome.runtime.lastError.message || 'Extension messaging failed');
-        return;
-      }
-      if (!response) {
-        setError('No response from background. Try reloading the extension.');
-        return;
-      }
-      if (response.error) {
-        setError(response.error);
-        return;
-      }
-      const results = response.results || [];
-      lastResults = results;
-      // Clamp coordinates to the captured viewport size
-      const viewportWidth = window.innerWidth * lastDpr;
-      const viewportHeight = window.innerHeight * lastDpr;
-      const clamped = results.map(r => ({
-        ...r,
-        x: Math.min(Math.max(r.x, 0), viewportWidth),
-        y: Math.min(Math.max(r.y, 0), viewportHeight),
-        w: Math.min(r.w, viewportWidth - r.x),
-        h: Math.min(r.h, viewportHeight - r.y),
-      })).filter(r => r.w > 5 && r.h > 5);
-      drawOverlays(clamped);
-
-      if (clamped.length === 0) {   // use clamped length, not results
-        showToast('No Japanese text found in the visible area.', 'info');
+    const viewport = {
+      dpr: window.devicePixelRatio || 1, width: window.innerWidth, height: window.innerHeight,
+      x: window.scrollX, y: window.scrollY, bounds: detectContentBounds(),
+    };
+    const revision = layoutRevision;
+    let response;
+    try {
+      if (sampleMode) {
+        const results = [...document.querySelectorAll('[data-translation]')].map(bubble => {
+          const rect = bubble.getBoundingClientRect();
+          return { x: rect.x * viewport.dpr, y: rect.y * viewport.dpr,
+            w: rect.width * viewport.dpr, h: rect.height * viewport.dpr, text: bubble.dataset.translation };
+        });
+        response = { results };
       } else {
-        showToast(`Translated ${clamped.length} text region${clamped.length === 1 ? '' : 's'}.`, 'info', 2000);
+        response = await chrome.runtime.sendMessage({ action: 'capture_and_translate' });
       }
-    });
+      if (layoutRevision !== revision) {
+        showToast('Page moved or resized. Click Translate again.');
+        return;
+      }
+      if (!response || response.error) throw new Error(response?.error || 'No response from the extension.');
+      drawOverlays(response.results || [], viewport);
+      const count = overlays.length;
+      showToast(count ? `Translated ${count} text region${count === 1 ? '' : 's'}.` :
+        'No usable text regions in the visible area.');
+    } catch (err) {
+      setBusy(false);
+      setError(err.message);
+      return;
+    } finally {
+      if (btn.dataset.error !== 'true') setBusy(false);
+    }
   }
 
   btn.addEventListener('click', triggerTranslation);
@@ -233,20 +246,19 @@
   // We convert: cssPixels = imagePixels / dpr, then add the scroll
   // offset captured at the moment of capture (NOT current scroll).
   // -----------------------------------------------------
-  function drawOverlays(results) {
+  function drawOverlays(results, viewport) {
     clearOverlays();
     if (!results || results.length === 0) return;
 
-    const dpr = lastDpr;
-    const scrollX = lastViewportScroll.x;
-    const scrollY = lastViewportScroll.y;
-    const contentBounds = detectContentBounds();
-
+    const { dpr, bounds: contentBounds } = viewport;
     for (const item of results) {
-      let cssLeft = item.x / dpr + scrollX;
-      const cssTop = item.y / dpr + scrollY;
-      let cssWidth = item.w / dpr;
-      const cssHeight = item.h / dpr;
+      if (![item.x, item.y, item.w, item.h].every(Number.isFinite)) continue;
+      const left = Math.max(0, item.x / dpr);
+      const top = Math.max(0, item.y / dpr);
+      let cssWidth = Math.min(viewport.width, (item.x + item.w) / dpr) - left;
+      const cssHeight = Math.min(viewport.height, (item.y + item.h) / dpr) - top;
+      let cssLeft = left + viewport.x;
+      const cssTop = top + viewport.y;
 
       // Skip bogus boxes. Two failure modes to reject:
       //   1. Tiny / zero-size boxes (model hallucination).
@@ -254,11 +266,11 @@
       // Long vertical recap columns are tall but very narrow, so we use AND
       // (not OR) on the dimension check to let them through.
       if (cssWidth < 8 || cssHeight < 8) continue;
-      if (cssWidth > window.innerWidth * 0.7 && cssHeight > window.innerHeight * 0.7) {
+      if (cssWidth > viewport.width * 0.7 && cssHeight > viewport.height * 0.7) {
         console.warn('[MangaTranslator] skipping full-page overlay', cssWidth, cssHeight);
         continue;
       }
-      const viewportArea = window.innerWidth * window.innerHeight;
+      const viewportArea = viewport.width * viewport.height;
       if (cssWidth * cssHeight > viewportArea * 0.4) {
         console.warn('[MangaTranslator] skipping overlay covering >40% of viewport');
         continue;
@@ -290,12 +302,16 @@
       el.style.height = `${cssHeight}px`;
       el.style.fontSize = `${computeFontSize(cssWidth, cssHeight, item.text)}px`;
       el.title = item.text; // tooltip for long text
-      document.body.appendChild(el);
+      document.documentElement.appendChild(el);
+      overlays.push(el);
     }
+    compare.hidden = overlays.length === 0;
   }
 
   function clearOverlays() {
-    document.querySelectorAll('.mtp-overlay').forEach((el) => el.remove());
+    for (const el of overlays.splice(0)) el.remove();
+    compare.hidden = true;
+    compare.textContent = 'Show original';
   }
 
   /**
@@ -331,6 +347,7 @@
   // Auto-mode: re-translate after scrolling stops
   // -----------------------------------------------------
   window.addEventListener('scroll', () => {
+    layoutRevision++;
     if (!autoMode) return;
     clearTimeout(scrollTimer);
     scrollTimer = setTimeout(triggerTranslation, 1500);
@@ -340,7 +357,8 @@
   window.addEventListener('resize', () => {
     // Resize invalidates pixel-space coordinates; safer to clear and let
     // the user re-translate.
-    if (lastResults.length > 0) {
+    layoutRevision++;
+    if (overlays.length > 0) {
       clearOverlays();
       showToast('Window resized — click Translate to redraw.', 'info', 2500);
     }

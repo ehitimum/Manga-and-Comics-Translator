@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overlay sample · Manga Translator Pro</title>
+<style>
+  * { box-sizing: border-box }
+  body { margin: 0 auto; max-width: 720px; padding: 32px 20px 140px; font: 16px/1.5 system-ui; color: #202020; background: #faf8f4 }
+  h1 { font-family: Georgia, serif; margin: 0 }
+  article { border: 3px solid #222; background: repeating-linear-gradient(135deg,#ddd 0 2px,#eee 2px 9px); display: flex; justify-content: space-around; align-items: center; height: 220px }
+  .bubble { padding: 10px; border: 2px solid #222; border-radius: 50%; background: white; width: 32%; height: 82px; display: grid; place-items: center }
+</style>
+<h1>Overlay sample</h1>
+<p>Click <strong>Translate</strong>, then <strong>Show original</strong> to compare. This sample uses two preset translations and runs entirely in this tab.</p>
+<article aria-label="Two Japanese speech bubbles">
+  <div class="bubble" lang="ja" data-translation="See you tomorrow!">また明日！</div>
+  <div class="bubble" lang="ja" data-translation="Thank you!">ありがとう！</div>
+</article>
+<script src="content.js"></script>
+</html>
