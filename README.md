@@ -9,7 +9,7 @@ From a source checkout, run `npm ci --ignore-scripts` and `npm run build`. Then 
 3. Turn on **Auto-translate on scroll** (or **Alt+Shift+A**) for long strips. New bubbles are translated when scrolling stops, and images below the screen are read ahead, so they are usually ready when you get there. Already-translated bubbles come from a cache.
 4. **Always translate on this site** in the popup asks for that site's permission once. After that, every chapter on the site translates on load.
 5. If a site hides or deletes the overlay, use **Snapshot view** in the popup. It opens the last capture with its translation in a separate tab.
-6. Optional: **Settings → Accurate mode** downloads PP-OCRv5 (about 19 MB, Apache-2.0, checksum-verified). It re-reads unclear bubbles and finds text outside bubbles, at some cost in speed.
+6. Optional: **Settings → Accurate mode** downloads a comic text detector and manga-ocr (about 128 MB, Apache-2.0, checksum-verified). manga-ocr re-reads unclear bubbles, and the detector finds grey bubbles, narration and text drawn on the art. It costs about 0.3 s per screen plus 0.3–0.4 s per extra bubble on a 4-core CPU.
 
 **How it works.**
 - Manga images are read directly from the page when the site allows it; otherwise the visible tab is captured.

@@ -7,7 +7,7 @@ Run `npm run build` first.
 | `npm test` | Node unit tests: geometry, OCR text assembly, translation batching, ZIP/CTC decoding, text fitting. |
 | `npm run bench` | Engine benchmark on the synthetic manga page (`tests/e2e/fixtures/manga-page.html`) at DPR 2 and 1. |
 | `npm run test:e2e` | Benchmark plus the extension suites: hostile pages, capture and source-image pipelines, cache, auto mode, snapshot view, always-translate sites, extension pages. |
-| `node tests/e2e/run.mjs --accurate` | Also downloads Accurate mode (19 MB) and checks it, including text outside bubbles. |
+| `node tests/e2e/run.mjs --accurate` | Also downloads Accurate mode (128 MB from Hugging Face) and checks it, including text outside bubbles. |
 
 The suites load a copy of `extension/` with `<all_urls>` added, because automation cannot grant `activeTab`. Pinned tessdata is downloaded to `tests/.cache` and checked against the SHA-256 in `extension/reader/models.js`. The `debugEchoTranslator` setting makes the engine "translate" to `[EN] <Japanese>` so the pipeline can be tested without a translation model.
 

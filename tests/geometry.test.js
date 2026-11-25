@@ -53,9 +53,3 @@ test('shape, hashing and LRU', () => {
   assert.equal(lru.get('a'), 1);
   assert.equal(lru.size, 2);
 });
-
-test('text lines are grouped into blocks', () => {
-  const groups = g.groupLines([{ x: 100, y: 0, w: 20, h: 100 }, { x: 75, y: 5, w: 20, h: 90 }, { x: 400, y: 0, w: 20, h: 60 }]);
-  assert.equal(groups.length, 2);
-  assert.deepEqual([groups[0].x, groups[0].w, groups[0].lines.length], [75, 45, 2]);
-});

@@ -1,42 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deflateRawSync } from 'node:zlib';
-import { unzipEntries, ctcDecode } from '../extension/engine/accurate.js';
+import { tiles, suppress, decodeTokens, tokenProbability, MODELS, DOWNLOAD_MB } from '../extension/engine/accurate.js';
 
-// Build a small zip (one deflated entry, one stored) the same way wheels are laid out.
-function zip(files) {
-  const locals = [], central = [];
-  let offset = 0;
-  for (const [name, data, method] of files) {
-    const body = method === 8 ? deflateRawSync(data) : data, n = Buffer.from(name);
-    const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(method, 8);
-    local.writeUInt32LE(body.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(n.length, 26);
-    const c = Buffer.alloc(46); c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(method, 10);
-    c.writeUInt32LE(body.length, 20); c.writeUInt32LE(data.length, 24); c.writeUInt16LE(n.length, 28); c.writeUInt32LE(offset, 42);
-    locals.push(local, n, body); central.push(c, n);
-    offset += 30 + n.length + body.length;
-  }
-  const dir = Buffer.concat(central), end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10);
-  end.writeUInt32LE(dir.length, 12); end.writeUInt32LE(offset, 16);
-  const b = Buffer.concat([...locals, dir, end]);
-  return b.buffer.slice(b.byteOffset, b.byteOffset + b.length);
-}
-
-test('wheel entries are extracted (deflate and stored)', async () => {
-  const text = Buffer.from('あいう\n'.repeat(50));
-  const out = await unzipEntries(zip([['a/dict.txt', text, 8], ['b.bin', Buffer.from([1, 2, 3]), 0], ['skip', Buffer.from('x'), 0]]), ['a/dict.txt', 'b.bin']);
-  assert.equal(Buffer.from(out['a/dict.txt']).toString(), text.toString());
-  assert.deepEqual([...new Uint8Array(out['b.bin'])], [1, 2, 3]);
-  assert.equal(out.skip, undefined);
-  await assert.rejects(unzipEntries(new ArrayBuffer(40), []), /Not a zip/);
+test('tall strips are split into overlapping square tiles; a normal page is one tile', () => {
+  assert.deepEqual(tiles(1280, 800), [{ x: 0, y: 0, w: 800, h: 800 }, { x: 480, y: 0, w: 800, h: 800 }]);
+  assert.deepEqual(tiles(800, 800), [{ x: 0, y: 0, w: 800, h: 800 }]);
+  const strip = tiles(800, 4000);
+  assert.equal(strip[0].y, 0);
+  assert.equal(strip.at(-1).y + strip.at(-1).h, 4000);
+  assert.ok(strip.every((t, i) => i === 0 || t.y < strip[i - 1].y + strip[i - 1].h), 'tiles overlap');
+  assert.ok(tiles(800, 100000).length <= 8);
 });
 
-test('CTC decoding drops blanks and repeats', () => {
-  const dict = ['', 'あ', 'い'];
-  // timesteps: あ あ blank い い
-  const p = Float32Array.from([0, .9, .1, 0, .8, .2, .9, .05, .05, .1, .1, .8, .1, .2, .7]);
-  const r = ctcDecode(p, 5, 3, dict);
-  assert.equal(r.text, 'あい');
-  assert.ok(r.confidence > 70);
+test('duplicate boxes from tile seams are suppressed per label', () => {
+  const kept = suppress([
+    { x: 0, y: 0, w: 100, h: 100, label: 'bubble', score: 0.9 },
+    { x: 5, y: 5, w: 100, h: 100, label: 'bubble', score: 0.8 },
+    { x: 5, y: 5, w: 100, h: 100, label: 'text_bubble', score: 0.7 },
+    { x: 300, y: 0, w: 50, h: 50, label: 'bubble', score: 0.6 },
+  ]);
+  assert.deepEqual(kept.map(k => [k.label, k.score]), [['bubble', 0.9], ['text_bubble', 0.7], ['bubble', 0.6]]);
+});
+
+test('manga-ocr tokens are joined without specials or spaces', () => {
+  const vocab = ['[PAD]', '[UNK]', '[CLS]', '[SEP]', 'ど', 'う', '##し', '.', ' '];
+  assert.equal(decodeTokens([2, 4, 5, 6, 8, 7, 7, 7], vocab), 'どうし…');
+});
+
+test('token probability is a softmax', () => {
+  const p = tokenProbability(Float32Array.from([0, 0, Math.log(2)]), 0, 3, 2);
+  assert.ok(Math.abs(p - 0.5) < 1e-6);
+});
+
+test('models are pinned to revisions with checksums', () => {
+  for (const m of Object.values(MODELS)) {
+    assert.match(m.url, /\/resolve\/[0-9a-f]{40}\//);
+    assert.match(m.sha256, /^[0-9a-f]{64}$/);
+  }
+  assert.equal(DOWNLOAD_MB, 128);
 });

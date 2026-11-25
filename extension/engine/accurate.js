@@ -1,73 +1,53 @@
-// Opt-in Accurate mode: PP-OCRv5 mobile (Apache-2.0) as a second pass for low-confidence crops and as a
-// text-line detector when no bubbles are found. Models come from a pinned, immutable PyPI wheel whose
-// SHA-256 is verified before use, then are cached unpacked in Cache Storage.
-export const WHEEL = {
-  url: 'https://files.pythonhosted.org/packages/8b/69/9e21a9884769a604ca43928da8eb6c4917188bde21d4d649b2a436849f4c/onnxocr_ppocrv5-0.0.23-py3-none-any.whl',
-  sha256: '63476d092e2194756775ac57af0500389054b5ba0fe9f777f882ccd33067263f',
-  bytes: 19176650,
-  files: {
-    det: { path: 'onnxocr/models/ppocrv5/det/det.onnx', sha256: 'd7fe3ea74652890722c0f4d02458b7261d9f5ae6c92904d05707c9eb155c7924' },
-    rec: { path: 'onnxocr/models/ppocrv5/rec/rec.onnx', sha256: 'bf66820f48fa99f779974c4df78e5274a9d8e0458c4137e8c5357e40e2c3faf2' },
-    dict: { path: 'onnxocr/models/ppocrv5/ppocrv5_dict.txt', sha256: 'd1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b' },
-  },
+// Opt-in Accurate mode (all Apache-2.0):
+//  - comic text & bubble detector (ogkalu, RT-DETR-v2 small, int8, 11 MB) finds bubbles and text the
+//    fast heuristic misses (grey/textured bubbles, narration and text drawn on the art);
+//  - manga-ocr (kha-white, ONNX by onnx-community; uint8 encoder + int8 decoder, 117 MB) re-reads
+//    bubbles Tesseract is unsure about.
+// Files come from pinned Hugging Face revisions, are checked against SHA-256, and cached in Cache Storage.
+const HF = 'https://huggingface.co';
+const DETECTOR = `${HF}/ogkalu/comic-text-and-bubble-detector/resolve/16e8a622f91fabc6b5b65c96d32d1183f8843546`;
+const MANGA_OCR = `${HF}/onnx-community/manga-ocr-base-ONNX/resolve/f9023406bb2f6b17df67bc4a327c56ecd20611f0/onnx`;
+const VOCAB = `${HF}/kha-white/manga-ocr-base/resolve/aa6573bd10b0d446cbf622e29c3e084914df9741`;
+
+export const MODELS = {
+  detector: { url: `${DETECTOR}/detector-v4-s_int8.onnx`, bytes: 11120765, sha256: '5fe9e4f576e49d4e7e8b0e029d6d3cdc252abd4694113e1cae120e62c931ea79' },
+  encoder: { url: `${MANGA_OCR}/encoder_model_uint8.onnx`, bytes: 86967805, sha256: 'a73e7a9959f3412f4d0ab60c8cd0f71c29e7e29a2e52a1e184ad6f2be3b892e3' },
+  decoder: { url: `${MANGA_OCR}/decoder_model_int8.onnx`, bytes: 29627936, sha256: '2e7177d2b0a59f1c612b694ed70c13971bee765cc2b2bc7bc9376e4753652f27' },
+  vocab: { url: `${VOCAB}/vocab.txt`, bytes: 24072, sha256: '344fbb6b8bf18c57839e924e2c9365434697e0227fac00b88bb4899b78aa594d' },
 };
-export const ACCURATE_CACHE = 'ppocrv5-' + WHEEL.sha256.slice(0, 12);
-const key = name => `https://mtp.invalid/ppocrv5/${name}`;
+export const DOWNLOAD_MB = Math.round(Object.values(MODELS).reduce((s, m) => s + m.bytes, 0) / 1e6);
+export const ACCURATE_CACHE = 'accurate-models-v2';
+export const LABELS = ['bubble', 'text_bubble', 'text_free'];
 
 async function sha256(buffer) {
   const d = new Uint8Array(await crypto.subtle.digest('SHA-256', buffer));
   return Array.from(d, b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Minimal ZIP reader (stored or deflate entries, no ZIP64) — enough for a wheel.
-export async function unzipEntries(buffer, wanted) {
-  const v = new DataView(buffer);
-  let eocd = -1;
-  for (let i = buffer.byteLength - 22; i >= Math.max(0, buffer.byteLength - 65557); i--) {
-    if (v.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-  }
-  if (eocd < 0) throw Error('Not a zip archive');
-  let p = v.getUint32(eocd + 16, true);
-  const count = v.getUint16(eocd + 10, true), out = {}, dec = new TextDecoder();
-  for (let n = 0; n < count; n++) {
-    if (v.getUint32(p, true) !== 0x02014b50) throw Error('Bad zip directory');
-    const method = v.getUint16(p + 10, true), csize = v.getUint32(p + 20, true);
-    const nameLen = v.getUint16(p + 28, true), extra = v.getUint16(p + 30, true), comment = v.getUint16(p + 32, true);
-    const local = v.getUint32(p + 42, true);
-    const name = dec.decode(new Uint8Array(buffer, p + 46, nameLen));
-    p += 46 + nameLen + extra + comment;
-    if (!wanted.includes(name)) continue;
-    const start = local + 30 + v.getUint16(local + 26, true) + v.getUint16(local + 28, true);
-    const raw = new Uint8Array(buffer, start, csize);
-    if (method === 0) out[name] = raw.slice().buffer;
-    else if (method === 8) out[name] = await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
-    else throw Error('Unsupported zip method ' + method);
-  }
-  return out;
-}
-
 export async function isInstalled() {
   const cache = await caches.open(ACCURATE_CACHE);
-  return (await Promise.all(Object.keys(WHEEL.files).map(k => cache.match(key(k))))).every(Boolean);
+  return (await Promise.all(Object.values(MODELS).map(m => cache.match(m.url)))).every(Boolean);
 }
 
 export async function install(status = () => {}) {
-  if (await isInstalled()) return;
-  status('Downloading Accurate mode models (19 MB)…');
-  const response = await fetch(WHEEL.url, { signal: AbortSignal.timeout(120000) });
-  if (!response.ok) throw Error(`Accurate mode download failed (${response.status}).`);
-  const wheel = await response.arrayBuffer();
-  if (wheel.byteLength !== WHEEL.bytes || await sha256(wheel) !== WHEEL.sha256) throw Error('Accurate mode download was incomplete or changed.');
-  const entries = await unzipEntries(wheel, Object.values(WHEEL.files).map(f => f.path));
   const cache = await caches.open(ACCURATE_CACHE);
-  for (const [name, file] of Object.entries(WHEEL.files)) {
-    const buf = entries[file.path];
-    if (!buf || await sha256(buf) !== file.sha256) throw Error('Accurate mode model failed verification: ' + name);
-    await cache.put(key(name), new Response(buf));
+  let done = 0;
+  for (const [name, m] of Object.entries(MODELS)) {
+    if (!(await cache.match(m.url))) {
+      status(`Downloading Accurate mode models · ${Math.round(100 * done / (DOWNLOAD_MB * 1e6))}%`);
+      const response = await fetch(m.url, { signal: AbortSignal.timeout(600000) });
+      if (!response.ok) throw Error(`Download of ${name} failed (${response.status}).`);
+      const buf = await response.arrayBuffer();
+      if (buf.byteLength !== m.bytes || await sha256(buf) !== m.sha256) throw Error(`The ${name} download was incomplete or changed.`);
+      await cache.put(m.url, new Response(buf));
+    }
+    done += m.bytes;
   }
+  // Older PP-OCRv5 cache from 0.5.0-beta.1 builds.
+  for (const key of await caches.keys()) if (key.startsWith('ppocrv5-')) await caches.delete(key);
 }
 
-export const remove = () => caches.delete(ACCURATE_CACHE);
+export const remove = () => { sessions = null; return caches.delete(ACCURATE_CACHE); };
 
 let sessions = null;
 async function load() {
@@ -76,104 +56,106 @@ async function load() {
     ort.env.wasm.wasmPaths = chrome.runtime.getURL('engine/vendor/ort/');
     ort.env.wasm.numThreads = globalThis.crossOriginIsolated ? Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) >> 1)) : 1;
     const cache = await caches.open(ACCURATE_CACHE);
-    const read = async k => { const r = await cache.match(key(k)); if (!r) throw Error('Accurate mode is not installed.'); return r; };
-    const [det, rec] = await Promise.all(['det', 'rec'].map(async k =>
-      ort.InferenceSession.create(new Uint8Array(await (await read(k)).arrayBuffer()), { executionProviders: ['wasm'] })));
-    const lines = (await (await read('dict')).text()).split('\n');
-    if (lines.at(-1) === '') lines.pop();
-    return { ort, det, rec, dict: ['', ...lines.map(l => l.replace(/\r$/, '')), ' '] };
+    const read = async name => {
+      const r = await cache.match(MODELS[name].url);
+      if (!r) throw Error('Accurate mode is not installed.');
+      return r;
+    };
+    const session = async name => ort.InferenceSession.create(new Uint8Array(await (await read(name)).arrayBuffer()), { executionProviders: ['wasm'] });
+    const [detector, encoder, decoder] = await Promise.all([session('detector'), session('encoder'), session('decoder')]);
+    const vocab = (await (await read('vocab')).text()).split('\n').map(t => t.replace(/\r$/, ''));
+    return { ort, detector, encoder, decoder, vocab };
   })().catch(e => { sessions = null; throw e; });
   return sessions;
 }
+export const warm = () => load();
 
-// DB text-line detection on a canvas/bitmap. Boxes are in input pixels.
-export async function detectLines(image, { maxSide = 960, thresh = 0.3, boxThresh = 0.6, unclip = 1.5 } = {}) {
-  const { ort, det } = await load();
-  const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
-  const w = Math.max(32, Math.round(image.width * scale / 32) * 32), h = Math.max(32, Math.round(image.height * scale / 32) * 32);
-  const c = new OffscreenCanvas(w, h), g = c.getContext('2d', { willReadFrequently: true });
-  g.drawImage(image, 0, 0, w, h);
-  const { data } = g.getImageData(0, 0, w, h);
-  const n = w * h, f = new Float32Array(3 * n);
-  for (let i = 0; i < n; i++) {
-    f[i] = (data[i * 4 + 2] / 255 - 0.485) / 0.229;
-    f[i + n] = (data[i * 4 + 1] / 255 - 0.456) / 0.224;
-    f[i + 2 * n] = (data[i * 4] / 255 - 0.406) / 0.225;
+function pixels(ort, image, size, sx, sy, sw, sh, mean, std) {
+  const c = new OffscreenCanvas(size, size), g = c.getContext('2d', { willReadFrequently: true });
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, size, size);
+  g.drawImage(image, sx, sy, sw, sh, 0, 0, size, size);
+  const d = g.getImageData(0, 0, size, size).data, n = size * size, f = new Float32Array(3 * n);
+  for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) f[i + k * n] = (d[i * 4 + k] / 255 - mean[k]) / std[k];
+  return new ort.Tensor('float32', f, [1, 3, size, size]);
+}
+
+// Square-ish tiles along the long side so tall strips are not squashed into 640×640.
+export function tiles(width, height, overlap = 0.12) {
+  const side = Math.min(width, height), long = Math.max(width, height);
+  const count = Math.min(8, Math.max(1, Math.ceil((long - side * overlap) / (side * (1 - overlap)))));
+  const step = count > 1 ? (long - side) / (count - 1) : 0;
+  return Array.from({ length: count }, (_, i) => width >= height
+    ? { x: Math.round(i * step), y: 0, w: side, h: height }
+    : { x: 0, y: Math.round(i * step), w: width, h: side });
+}
+
+const iou = (a, b) => {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x), h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  if (w <= 0 || h <= 0) return 0;
+  const i = w * h;
+  return i / (a.w * a.h + b.w * b.h - i);
+};
+// Keep the best box per label among overlapping ones (tile seams produce duplicates).
+export function suppress(boxes, threshold = 0.5) {
+  const kept = [];
+  for (const b of [...boxes].sort((p, q) => q.score - p.score)) {
+    if (!kept.some(k => k.label === b.label && iou(k, b) > threshold)) kept.push(b);
   }
-  const out = await det.run({ [det.inputNames[0]]: new ort.Tensor('float32', f, [1, 3, h, w]) });
-  const prob = out[det.outputNames[0]].data, sx = image.width / w, sy = image.height / h;
-  const bin = new Uint8Array(n);
-  for (let i = 0; i < n; i++) bin[i] = prob[i] > thresh ? 1 : 0;
-  const q = new Int32Array(n), boxes = [];
-  for (let i = 0; i < n; i++) {
-    if (!bin[i]) continue;
-    bin[i] = 0; q[0] = i;
-    let m = 1, x0 = w, y0 = h, x1 = 0, y1 = 0, sum = 0;
-    for (let k = 0; k < m; k++) {
-      const p = q[k], x = p % w, y = (p / w) | 0;
-      sum += prob[p];
-      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
-      if (x > 0 && bin[p - 1]) { bin[p - 1] = 0; q[m++] = p - 1; }
-      if (x < w - 1 && bin[p + 1]) { bin[p + 1] = 0; q[m++] = p + 1; }
-      if (y > 0 && bin[p - w]) { bin[p - w] = 0; q[m++] = p - w; }
-      if (y < h - 1 && bin[p + w]) { bin[p + w] = 0; q[m++] = p + w; }
+  return kept;
+}
+
+// Boxes in image pixels: { x, y, w, h, label: 'bubble'|'text_bubble'|'text_free', score }.
+export async function detectRegions(image, { minScore = 0.5 } = {}) {
+  const { ort, detector } = await load();
+  const out = [];
+  for (const t of tiles(image.width, image.height)) {
+    const res = await detector.run({
+      images: pixels(ort, image, 640, t.x, t.y, t.w, t.h, [0, 0, 0], [1, 1, 1]),
+      orig_target_sizes: new ort.Tensor('int64', BigInt64Array.from([BigInt(t.w), BigInt(t.h)]), [1, 2]),
+    });
+    const L = res.labels.data, B = res.boxes.data, S = res.scores.data;
+    for (let i = 0; i < S.length; i++) {
+      if (S[i] < minScore) continue;
+      const [x0, y0, x1, y1] = [B[i * 4], B[i * 4 + 1], B[i * 4 + 2], B[i * 4 + 3]];
+      out.push({ x: t.x + Math.max(0, x0), y: t.y + Math.max(0, y0), w: Math.min(t.w, x1) - Math.max(0, x0), h: Math.min(t.h, y1) - Math.max(0, y0), label: LABELS[Number(L[i])] || 'text_free', score: S[i] });
     }
-    const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
-    if (Math.min(bw, bh) < 3 || sum / m < boxThresh) continue;
-    const d = bw * bh * unclip / (2 * (bw + bh));
-    const bx = Math.max(0, (x0 - d) * sx), by = Math.max(0, (y0 - d) * sy);
-    boxes.push({ x: bx, y: by, w: Math.min(image.width, (x1 + 1 + d) * sx) - bx, h: Math.min(image.height, (y1 + 1 + d) * sy) - by });
   }
-  return boxes;
+  return suppress(out.filter(b => b.w > 8 && b.h > 8));
 }
 
-// Recognise one text line. Tall crops are rotated 90° CCW, as PaddleOCR does for vertical text.
-export async function recognizeLine(image, box) {
-  const { ort, rec, dict } = await load();
-  const cw = Math.max(1, Math.round(box.w)), ch = Math.max(1, Math.round(box.h));
-  let src = new OffscreenCanvas(cw, ch);
-  src.getContext('2d').drawImage(image, box.x, box.y, box.w, box.h, 0, 0, cw, ch);
-  let w = cw, h = ch;
-  if (h / w >= 1.5) {
-    const r = new OffscreenCanvas(h, w), g = r.getContext('2d');
-    g.translate(0, w); g.rotate(-Math.PI / 2); g.drawImage(src, 0, 0);
-    src = r; [w, h] = [h, w];
-  }
-  const H = 48, W = Math.max(16, Math.min(3200, Math.round(H * w / h)));
-  const c = new OffscreenCanvas(W, H), g = c.getContext('2d', { willReadFrequently: true });
-  g.drawImage(src, 0, 0, W, H);
-  const { data } = g.getImageData(0, 0, W, H);
-  const n = W * H, f = new Float32Array(3 * n);
-  for (let i = 0; i < n; i++) {
-    f[i] = (data[i * 4 + 2] / 255 - 0.5) / 0.5;
-    f[i + n] = (data[i * 4 + 1] / 255 - 0.5) / 0.5;
-    f[i + 2 * n] = (data[i * 4] / 255 - 0.5) / 0.5;
-  }
-  const out = await rec.run({ [rec.inputNames[0]]: new ort.Tensor('float32', f, [1, 3, H, W]) });
-  const o = out[rec.outputNames[0]], [, T, C] = o.dims, p = o.data;
-  return ctcDecode(p, T, C, dict);
+// Join BERT-style character tokens, dropping special tokens and spaces (as manga-ocr's post-processing does).
+export function decodeTokens(ids, vocab) {
+  return ids.map(i => vocab[i] ?? '').filter(t => !/^\[(CLS|SEP|PAD|UNK|MASK)\]$/.test(t))
+    .map(t => t.replace(/^##/, '')).join('').replace(/\s+/g, '').replace(/\.{3,}/g, '…');
 }
 
-export function ctcDecode(p, T, C, dict) {
-  let text = '', prev = -1, conf = 0, count = 0;
-  for (let t = 0; t < T; t++) {
-    let best = 0, bv = -Infinity;
-    for (let k = 0; k < C; k++) { const v = p[t * C + k]; if (v > bv) { bv = v; best = k; } }
-    if (best !== 0 && best !== prev) { text += dict[best] ?? ''; conf += bv; count++; }
-    prev = best;
-  }
-  return { text, confidence: count ? 100 * conf / count : 0 };
+// Softmax probability of the chosen token, for a confidence estimate.
+export function tokenProbability(logits, offset, size, best) {
+  let max = -Infinity, sum = 0;
+  for (let k = 0; k < size; k++) if (logits[offset + k] > max) max = logits[offset + k];
+  for (let k = 0; k < size; k++) sum += Math.exp(logits[offset + k] - max);
+  return Math.exp(logits[offset + best] - max) / sum;
 }
 
-// Read a whole bubble crop: detect its lines, recognise each, join in reading order.
-export async function readCrop(canvas, vertical) {
-  const lines = await detectLines(canvas, { maxSide: 640 });
-  const results = [];
-  for (const b of lines) {
-    const r = await recognizeLine(canvas, b);
-    if (r.text.trim()) results.push({ ...b, ...r });
+// Read one text block (a whole bubble) with manga-ocr: greedy decoding, start token 2, end token 3.
+export async function readText(image, rect = { x: 0, y: 0, w: image.width, h: image.height }, { maxTokens = 64 } = {}) {
+  const { ort, encoder, decoder, vocab } = await load();
+  const { last_hidden_state } = await encoder.run({ pixel_values: pixels(ort, image, 224, rect.x, rect.y, rect.w, rect.h, [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]) });
+  const ids = [2];
+  let confidence = 0;
+  for (let step = 0; step < maxTokens; step++) {
+    const { logits } = await decoder.run({
+      input_ids: new ort.Tensor('int64', BigInt64Array.from(ids.map(BigInt)), [1, ids.length]),
+      encoder_hidden_states: last_hidden_state,
+    });
+    const V = logits.dims[2], off = (ids.length - 1) * V, d = logits.data;
+    let best = 0;
+    for (let k = 1; k < V; k++) if (d[off + k] > d[off + best]) best = k;
+    if (best === 3) break;
+    confidence += tokenProbability(d, off, V, best);
+    ids.push(best);
   }
-  results.sort((a, b) => vertical ? (b.x - a.x) || (a.y - b.y) : (a.y - b.y) || (a.x - b.x));
-  const chars = results.reduce((s, r) => s + r.text.length, 0);
-  return chars ? { text: results.map(r => r.text).join(''), confidence: results.reduce((s, r) => s + r.confidence * r.text.length, 0) / chars, lines: results } : null;
+  const text = decodeTokens(ids.slice(1), vocab);
+  return { text, confidence: ids.length > 1 ? 100 * confidence / (ids.length - 1) : 0 };
 }

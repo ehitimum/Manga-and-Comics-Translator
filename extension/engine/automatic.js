@@ -1,11 +1,11 @@
 import { detectBubbles, bubbleCrop } from './bubbles.js';
 import { OcrPool } from './ocr.js';
 import { extractRegions, bubbleText, japaneseCount } from './regions.js';
-import { groupLines, isExcluded, LRU, readingOrder } from './geometry.js';
+import { coverage, isExcluded, LRU, readingOrder } from './geometry.js';
 import { getTranslator, translationQueue } from '../providers/pageTranslation.js';
 import * as accurate from './accurate.js';
 
-export const ENGINE_VERSION = 'e2';
+export const ENGINE_VERSION = 'e3';
 const pool = new OcrPool();
 const crops = new LRU(500);            // crop hash -> { text, confidence } (OCR result)
 const translations = new LRU(1000);    // Japanese text -> English
@@ -22,7 +22,7 @@ chrome.runtime.onMessage.addListener((request, sender, respond) => {
       return reply((async () => {
         await pool.warm();
         await getTranslator(() => {}, { test: request.settings?.debugEchoTranslator }).catch(() => {});
-        if (request.settings?.accurateMode && await accurate.isInstalled()) await accurate.detectLines(new OffscreenCanvas(32, 32)).catch(() => {});
+        if (request.settings?.accurateMode && await accurate.isInstalled()) await accurate.warm().catch(() => {});
         return { ok: true };
       })());
     case 'engine_stats': respond({ ...stats, cachedCrops: crops.size, isolated: globalThis.crossOriginIsolated, poolSize: pool.size }); return;
@@ -90,8 +90,8 @@ async function runPipeline(source, req, alive, emit) {
   const status = message => send({ action: 'page_translation_status', tabId: req.tabId, message });
   status('Finding speech bubbles…');
   const exclude = req.exclude || [];
-  const prepared = [];
-  for (const candidate of detectBubbles(source)) {
+  const prepared = [], candidates = detectBubbles(source);
+  for (const candidate of candidates) {
     if (isExcluded(candidate, exclude)) continue;
     const crop = bubbleCrop(source, candidate);
     if (crop) prepared.push({ ...crop, x: crop.bubble.x, y: crop.bubble.y, w: crop.bubble.w, h: crop.bubble.h });
@@ -119,36 +119,52 @@ async function runPipeline(source, req, alive, emit) {
   if (ordered.length) status(`Reading ${ordered.length} bubble${ordered.length === 1 ? '' : 's'}…`);
   await Promise.all(ordered.map(async crop => {
     if (!alive()) return;
-    let read = crops.get(crop.hash);
+    const key = crop.hash + (useAccurate ? 'a' : '');
+    let read = crops.get(key);
     if (read !== undefined) stats.cacheHits++;
     else {
       stats.ocrJobs++;
       const data = await pool.recognize(crop.canvas, crop.vertical);
       read = bubbleText(extractRegions(data, 55), crop.vertical);
       if (useAccurate && (!read || read.confidence < 60)) {
+        // manga-ocr reads stylised manga lettering far better; prefer it when Tesseract is unsure.
         stats.accurateJobs++;
-        const second = await accurate.readCrop(crop.canvas, crop.vertical).catch(() => null);
-        if (second && japaneseCount(second.text) && (!read || second.confidence > read.confidence)) read = second;
+        const second = await accurate.readText(crop.canvas).catch(() => null);
+        if (second && japaneseCount(second.text)) read = second;
       }
-      crops.set(crop.hash, read);
+      crops.set(key, read);
     }
     deliver({ ...crop.bubble }, read);
   }));
-  // Accurate mode: nothing bubble-shaped found — look for text lines anywhere (narration, text on art).
-  if (useAccurate && !ordered.length && alive()) {
-    status('No bubbles found · scanning for text lines…');
-    for (const group of groupLines(await accurate.detectLines(source))) {
-      if (isExcluded(group, exclude)) continue;
-      const parts = [];
-      for (const line of group.lines) { stats.accurateJobs++; const r = await accurate.recognizeLine(source, line); if (japaneseCount(r.text)) parts.push({ ...line, ...r }); }
-      if (!parts.length) continue;
-      const vertical = group.h > group.w;
-      parts.sort((a, b) => vertical ? b.x - a.x : a.y - b.y);
-      deliver({ x: group.x, y: group.y, w: group.w, h: group.h, dark: false, shape: 'rect' }, { text: parts.map(p => p.text).join(''), confidence: 70 });
+  // Accurate mode: the learned detector finds what the heuristic missed — grey or textured bubbles,
+  // narration and text drawn on the art — and manga-ocr reads each one.
+  if (useAccurate && alive()) {
+    status('Looking for text outside bubbles…');
+    const regions = await accurate.detectRegions(source).catch(() => []);
+    const known = [...candidates, ...exclude];
+    for (const r of regions) {
+      if (r.label === 'text_bubble' || !alive()) continue;
+      if (known.some(k => coverage(r, k) > 0.3 || coverage(k, r) > 0.5)) continue;
+      // Read the text box inside a bubble when the detector found one; it is a tighter crop.
+      const inner = r.label === 'bubble' && regions.find(t => t.label === 'text_bubble' && coverage(t, r) > 0.8);
+      const rect = inner || r;
+      stats.accurateJobs++;
+      const read = await accurate.readText(source, rect).catch(() => null);
+      deliver({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h), shape: r.label === 'bubble' ? 'ellipse' : 'rect', dark: isDark(source, r) }, read);
     }
   }
   await queue.drain();
   return results;
+}
+
+// Average brightness of a region decides white-on-black overlays.
+function isDark(source, r) {
+  const c = new OffscreenCanvas(16, 16), g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(source, r.x, r.y, r.w, r.h, 0, 0, 16, 16);
+  const d = g.getImageData(0, 0, 16, 16).data;
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += (d[i * 4] * 3 + d[i * 4 + 1] * 6 + d[i * 4 + 2]) / 10;
+  return sum / 256 < 100;
 }
 
 // ---- tiny IndexedDB key/value store for source-image results

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Toggle } from './ui';
 
-const ACCURATE_HOST = 'https://files.pythonhosted.org/*';
-
-// Accurate mode downloads PP-OCRv5 (Apache-2.0, ~19 MB) from a pinned PyPI wheel, verified by SHA-256.
+// Accurate mode downloads a comic text/bubble detector and manga-ocr (Apache-2.0, ~128 MB) from pinned
+// Hugging Face revisions, verified by SHA-256. Hugging Face allows cross-origin downloads, so no extra
+// permission is needed.
 export function AccurateModeToggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
   const [status, setStatus] = useState('');
   const toggle = async (on: boolean) => {
@@ -13,10 +13,7 @@ export function AccurateModeToggle({ enabled, onChange }: { enabled: boolean; on
       setStatus('Accurate mode models removed.');
       return;
     }
-    // Permission prompts need this click's user gesture.
-    const granted = await chrome.permissions.request({ origins: [ACCURATE_HOST] });
-    if (!granted) { setStatus('Permission declined; Accurate mode stays off.'); return; }
-    setStatus('Downloading and verifying models (19 MB)…');
+    setStatus('Downloading and verifying models (about 128 MB)…');
     const res = await chrome.runtime.sendMessage({ action: 'engine_forward', message: { action: 'accurate_install' } });
     if (res?.error) { setStatus(`Download failed: ${res.error}`); return; }
     onChange(true);
@@ -27,8 +24,8 @@ export function AccurateModeToggle({ enabled, onChange }: { enabled: boolean; on
       <Toggle
         checked={enabled}
         onChange={toggle}
-        label="Accurate mode (PP-OCRv5)"
-        description="Re-reads low-confidence bubbles and finds text outside bubbles. Downloads about 19 MB once from files.pythonhosted.org; slower than the default."
+        label="Accurate mode (manga-ocr + comic text detector)"
+        description="Re-reads bubbles Tesseract is unsure about with manga-ocr, and finds grey bubbles, narration and text drawn on the art. Downloads about 128 MB once from Hugging Face. Adds roughly 0.3–0.4 s per extra bubble plus ~0.3 s per screen on a 4-core CPU."
       />
       {status && <p className="mt-2 text-xs text-[var(--color-muted)]">{status}</p>}
     </div>

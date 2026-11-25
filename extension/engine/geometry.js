@@ -98,17 +98,3 @@ export class LRU {
   get size() { return this.map.size; }
 }
 
-// Merge nearby text lines into blocks (columns of one balloon or caption).
-export function groupLines(lines, gap = 0.6) {
-  const groups = [];
-  for (const l of lines) {
-    const pad = Math.min(l.w, l.h) * gap;
-    const near = groups.find(g => l.x < g.x + g.w + pad && l.x + l.w + pad > g.x && l.y < g.y + g.h + pad && l.y + l.h + pad > g.y);
-    if (near) {
-      const x = Math.min(near.x, l.x), y = Math.min(near.y, l.y);
-      near.w = Math.max(near.x + near.w, l.x + l.w) - x; near.h = Math.max(near.y + near.h, l.y + l.h) - y;
-      near.x = x; near.y = y; near.lines.push(l);
-    } else groups.push({ x: l.x, y: l.y, w: l.w, h: l.h, lines: [l] });
-  }
-  return groups;
-}

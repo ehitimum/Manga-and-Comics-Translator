@@ -361,11 +361,13 @@ async function accurateSuite(x, port) {
   check('Accurate mode models download and verify', !res?.error, res?.error || 'ok');
   if (res?.error) return;
   await x.set({ accurateMode: true });
+  await x.page.bringToFront();
   await x.page.goto(`http://127.0.0.1:${port}/fixtures/manga-page.html`);
   await x.inject();
   await x.message({ action: 'trigger_from_popup' });
-  await sleep(5000);
-  const n = (await x.message({ action: 'overlay_state' }))?.items || 0;
+  let n = 0;
+  for (let i = 0; i < 120 && (n < 7 || (await x.message({ action: 'overlay_state' }))?.busy); i++) { await sleep(250); n = (await x.message({ action: 'overlay_state' }))?.items || 0; }
+  console.log('  accurate run:', JSON.stringify((await x.message({ action: 'overlay_state' })).lastRun), JSON.stringify(await x.engine({ action: 'engine_stats' })));
   check('Accurate mode pipeline produces overlays', n >= 7, `${n} overlays`);
   // Text drawn straight on grey art (no bubble): only Accurate mode's line detector can find it.
   generated.set('/p/nobubble', { type: 'text/html', body: `<!doctype html><meta charset="utf-8"><style>body{margin:0;height:800px;background:repeating-linear-gradient(45deg,#777 0 6px,#8a8a8a 6px 12px);font:700 34px IPAGothic,sans-serif}p{position:absolute;left:600px;top:200px;margin:0;writing-mode:vertical-rl;color:#111;-webkit-text-stroke:0}</style><p>その時、空が割れた</p>` });
@@ -373,7 +375,8 @@ async function accurateSuite(x, port) {
   await x.page.goto(`http://127.0.0.1:${port}/p/nobubble`);
   await x.inject();
   await x.message({ action: 'trigger_from_popup' });
-  await sleep(4000);
+  for (let i = 0; i < 120; i++) { await sleep(250); if (!(await x.message({ action: 'overlay_state' }))?.busy) break; }
+  console.log('  no-bubble run:', JSON.stringify((await x.message({ action: 'overlay_state' })).lastRun));
   const after = await x.engine({ action: 'engine_stats' });
   const m = (await x.message({ action: 'overlay_state' }))?.items || 0;
   check('Accurate mode finds text outside bubbles', m >= 1 && after.accurateJobs > before.accurateJobs, `${m} overlays, accurate jobs +${after.accurateJobs - before.accurateJobs}`);
