@@ -68,20 +68,22 @@ function score(results, gt) {
     const a = norm(g.text), b = norm(text);
     return Math.max(0, 1 - lev(a, b) / Math.max(a.length, b.length));
   });
-  return { mean: sims.reduce((s, v) => s + v, 0) / sims.length, read: sims.filter(v => v >= 0.8).length, of: visible.length,
+  return { sims, mean: sims.reduce((s, v) => s + v, 0) / sims.length, read: sims.filter(v => v >= 0.8).length, of: visible.length,
     fp: results.filter(r => !gt.some(g => inside(r, g))).length };
 }
 
-async function capturePage(browser, port, dpr) {
+async function capturePage(browser, port, dpr, fixture = 'manga-page.html') {
   const p = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });
-  await p.goto(`http://127.0.0.1:${port}/fixtures/manga-page.html`);
+  await p.goto(`http://127.0.0.1:${port}/fixtures/${fixture}`);
   await p.evaluate(() => document.fonts.ready);
   const png = await p.screenshot();
-  const gt = await p.evaluate(dpr => [...document.querySelectorAll('[data-gt]')].map(el => {
+  // Hard-page bubbles count even when cut off: their text is fully on screen. Boxes are clipped to the screen.
+  const gt = await p.evaluate(([dpr, all]) => [...document.querySelectorAll('[data-gt]')].map(el => {
     const r = el.getBoundingClientRect();
-    const full = el.classList.contains('bubble') && r.bottom <= innerHeight && r.top >= 0;
-    return { text: el.dataset.gt, full, x: r.left * dpr, y: r.top * dpr, w: r.width * dpr, h: Math.min(r.height, innerHeight - r.top) * dpr };
-  }), dpr);
+    const full = el.classList.contains('bubble') && (all || (r.bottom <= innerHeight && r.top >= 0));
+    const top = Math.max(0, r.top), bottom = Math.min(innerHeight, r.bottom);
+    return { text: el.dataset.gt, full, x: r.left * dpr, y: top * dpr, w: r.width * dpr, h: (bottom - top) * dpr };
+  }), [dpr, fixture !== 'manga-page.html']);
   await p.close();
   return { png, gt };
 }
@@ -103,10 +105,21 @@ async function engineBench(browser, port) {
     for (let i = 0; i < 3; i++) { const r = await page.evaluate(img => engineBench.run(img), image); if (!best || r.total < best.total) best = r; }
     const s = score(best.results, gt);
     const t = Object.entries(best.t).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ');
+    if (process.env.MTP_DEBUG) console.log('   ', s.sims.map(v => v.toFixed(2)).join(' '), JSON.stringify(best.results.map(r => [r.text, r.runs?.join(','), r.furigana, r.dark])));
     console.log(`  DPR ${dpr}: OCR stage ${Math.round(best.total)} ms (first ${Math.round(best.first)} ms; ${t}); ${best.crops}/${best.candidates} candidates OCR'd; read ${s.read}/${s.of}, mean ${s.mean.toFixed(2)}, false positives ${s.fp}`);
     check(`engine DPR ${dpr}: fully visible bubbles similarity ≥ 0.9`, s.mean >= 0.9, s.mean.toFixed(2));
     check(`engine DPR ${dpr}: no false positives`, s.fp === 0, String(s.fp));
     check(`engine DPR ${dpr}: warm OCR stage ≤ 1500 ms`, best.total <= 1500, `${Math.round(best.total)} ms`);
+  }
+  // Furigana, broken outlines on a pale page, and bubbles cut by the screen edge (the cases from real sites).
+  for (const dpr of [2, 1]) {
+    const { png, gt } = await capturePage(browser, port, dpr, 'hard-page.html');
+    if (dpr === 1) generated.set('/gen/hard-dpr1.png', { type: 'image/png', body: png });
+    const r = await page.evaluate(img => engineBench.run(img, { allowEdges: true }), 'data:image/png;base64,' + png.toString('base64'));
+    const s = score(r.results, gt);
+    if (process.env.MTP_DEBUG) console.log('   ', JSON.stringify(r.results.map(x => [x.text, Math.round(x.confidence), x.runs?.join(',')])));
+    console.log(`  hard page DPR ${dpr}: ${Math.round(r.total)} ms; read ${s.read}/${s.of} (${s.sims.map(v => v.toFixed(2)).join(' ')}); false positives ${s.fp}`);
+    check(`engine hard page DPR ${dpr}: all 4 difficult bubbles read`, s.read === 4, `${s.read}/${s.of}`);
   }
   await page.evaluate(() => engineBench.close());
   await page.close();
@@ -143,18 +156,18 @@ function registerHostileAssets() {
   }
 }
 
-function testExtensionCopy() {
+function testExtensionCopy(allUrls = true) {
   // Automation cannot grant activeTab, so the test copy gets <all_urls> for captureVisibleTab.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mtp-ext-'));
   fs.cpSync(path.join(ROOT, 'extension'), dir, { recursive: true });
   const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json')));
-  m.host_permissions.push('<all_urls>');
+  if (allUrls) m.host_permissions.push('<all_urls>');
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(m));
   return dir;
 }
 
-async function launchExtension() {
-  const ext = testExtensionCopy();
+async function launchExtension({ allUrls = true } = {}) {
+  const ext = testExtensionCopy(allUrls);
   const ctx = await chromium.launchPersistentContext(fs.mkdtempSync(path.join(os.tmpdir(), 'mtp-profile-')), {
     channel: 'chromium', viewport: { width: 1280, height: 800 },
     args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`],
@@ -302,8 +315,26 @@ async function pipelineSuite(x, port) {
     if (visit === 1) check('source image translated from the <img>', after.images > before.images && n >= 7, `${n} overlays, images ${before.images}→${after.images}`);
     else check('revisited image served from the results cache', after.imageCacheHits > before.imageCacheHits && n >= 7, `${n} overlays, cache hits ${before.imageCacheHits}→${after.imageCacheHits}`);
   }
+  // d2. step 1 reads the visible page plus the next 5 below, without scrolling
+  generated.set('/p/chapter', { type: 'text/html', body: `<!doctype html><style>body{margin:0;background:#222}img{display:block;margin:0 auto 40px;width:1280px;height:800px}</style>${Array.from({ length: 10 }, (_, i) => `<img src="/gen/page-dpr1.png?chapter=${i}">`).join('')}` });
+  await x.page.goto(`http://127.0.0.1:${port}/p/chapter`);
+  await x.page.waitForFunction(() => [...document.images].every(i => i.complete));
+  await x.inject();
+  const c0 = await x.engine({ action: 'engine_stats' });
+  await x.message({ action: 'trigger_from_popup' });
+  for (let i = 0; i < 100; i++) { await sleep(200); const c = await x.engine({ action: 'engine_stats' }); if (c.images + c.imageCacheHits - c0.images - c0.imageCacheHits >= 6) break; }
+  await sleep(1500);
+  const c1 = await x.engine({ action: 'engine_stats' });
+  const read = c1.images + c1.imageCacheHits - c0.images - c0.imageCacheHits;
+  check('whole pages are read ahead: visible page + next 5', read === 6, `${read} images read`);
+  await x.page.mouse.move(640, 400);
+  await x.page.mouse.wheel(0, 2520);
+  await sleep(2500);
+  const c2 = await x.engine({ action: 'engine_stats' });
+  check('scrolling extends the read-ahead window', c2.images + c2.imageCacheHits - c0.images - c0.imageCacheHits > read, `${c2.images + c2.imageCacheHits - c0.images - c0.imageCacheHits} images after scrolling`);
+
   // e. incremental auto mode on a long capture-only page (canvas-free <div> art)
-  generated.set('/p/long', { type: 'text/html', body: `<!doctype html><style>body{margin:0;background:#1e1e1e}iframe{display:block;border:0;width:1280px;height:800px}</style>${'<div style="width:1280px;height:800px;background:url(/gen/page-dpr1.png)"></div>'.repeat(3)}` });
+  generated.set('/p/long', { type: 'text/html', body: `<!doctype html><style>body{margin:0;background:#1e1e1e}iframe{display:block;border:0;width:1280px;height:800px}</style>${'<div style="height:150px"></div>' + '<div style="width:1280px;height:800px;background:url(/gen/page-dpr1.png)"></div>'.repeat(3)}` });
   await x.set({ autoMode: true });
   await x.page.goto(`http://127.0.0.1:${port}/p/long`);
   await sleep(800);
@@ -311,12 +342,18 @@ async function pipelineSuite(x, port) {
   await x.message({ action: 'trigger_from_popup' });
   await sleep(3000);
   const s1 = await x.engine({ action: 'engine_stats' });
+  const dbgBefore = (await x.message({ action: 'overlay_state', debug: true })).debug;
+  const partialBefore = dbgBefore.filter(d => d.partial && d.anchorTop === 150).length;
+  if (process.env.MTP_DEBUG) console.log('  before:', JSON.stringify(dbgBefore.map(d => [d.text, d.partial, d.anchorTop, d.rel && +d.rel.y.toFixed(2)])));
   await x.page.mouse.move(640, 400);
   await x.page.mouse.wheel(0, 300);
   await sleep(3000);
   const s2 = await x.engine({ action: 'engine_stats' });
-  const state = await x.message({ action: 'overlay_state' });
-  check('auto mode re-translates after scrolling, reusing cached bubbles', s2.ocrJobs - s1.ocrJobs <= 3 && s2.cacheHits > s1.cacheHits && state.items > 7, `new OCR jobs ${s2.ocrJobs - s1.ocrJobs}, cache hits +${s2.cacheHits - s1.cacheHits}, overlays ${state.items}`);
+  const state = await x.message({ action: 'overlay_state', debug: true });
+  const partialAfter = state.debug.filter(d => d.partial && d.anchorTop === 150).length;
+  if (process.env.MTP_DEBUG) console.log('  after:', JSON.stringify(state.debug.map(d => [d.text, d.partial, d.anchorTop, d.rel && +d.rel.y.toFixed(2)])), 'scrollY', await x.page.evaluate(() => scrollY));
+  check('bubbles cut by the screen edge are translated, then replaced once fully visible', partialBefore >= 1 && partialAfter === 0, `partial overlays on the first page ${partialBefore} → ${partialAfter}`);
+  check('auto mode re-translates only newly visible bubbles after scrolling', s2.ocrJobs - s1.ocrJobs <= 6 && state.items > 7, `new OCR jobs ${s2.ocrJobs - s1.ocrJobs}, cache hits +${s2.cacheHits - s1.cacheHits}, overlays ${state.items}`);
   await x.set({ autoMode: false });
 
   // f. extension pages load without errors; the bundled overlay demo still works
@@ -354,6 +391,26 @@ async function pipelineSuite(x, port) {
   const left = await helper2.evaluate(() => chrome.scripting.getRegisteredContentScripts());
   check('removing the site unregisters its script', left.length === 0, JSON.stringify(left.map(s => s.id)));
   await helper2.close();
+}
+
+// Images on a host the extension may not read: step 1 must report it instead of failing silently.
+async function accessSuite(port) {
+  const imgServer = http.createServer((req, res) => res.writeHead(200, { 'content-type': 'image/png' }).end(generated.get('/gen/page-dpr1.png').body));
+  await new Promise(r => imgServer.listen(8774, '127.0.0.2', r));
+  generated.set('/p/blocked', { type: 'text/html', body: `<!doctype html><style>body{margin:0}img{display:block;width:1280px}</style><img src="http://127.0.0.2:8774/page.png">` });
+  const x = await launchExtension({ allUrls: false });
+  try {
+    await x.set({ provider: 'browser', debugEchoTranslator: true });
+    await x.page.goto(`http://127.0.0.1:${port}/p/blocked`);
+    await x.page.waitForFunction(() => [...document.images].every(i => i.complete && i.naturalWidth));
+    await x.inject();
+    await x.message({ action: 'trigger_from_popup' });
+    let info;
+    for (let i = 0; i < 40; i++) { await sleep(500); info = await x.message({ action: 'page_info' }); if (info?.blockedHosts?.length) break; }
+    if (process.env.MTP_DEBUG) console.log('  direct engine:', JSON.stringify(await x.engine({ action: 'translate_image', url: 'http://127.0.0.2:8774/page.png', width: 1280, height: 800, tabId: -1, settings: { debugEchoTranslator: true } })));
+    if (process.env.MTP_DEBUG) console.log('  blocked run:', JSON.stringify((await x.message({ action: 'overlay_state' })).lastRun));
+    check('blocked image host is detected and reported', info?.blockedHosts?.includes('127.0.0.2:8774'), JSON.stringify(info));
+  } finally { await x.ctx.close(); imgServer.close(); fs.rmSync(x.ext, { recursive: true, force: true }); }
 }
 
 async function accurateSuite(x, port) {
@@ -399,6 +456,7 @@ try {
       await pipelineSuite(x, 8770);
       if (args.has('--accurate')) await accurateSuite(x, 8770);
     } finally { await x.ctx.close(); fs.rmSync(x.ext, { recursive: true, force: true }); }
+    await accessSuite(8770);
   }
 } finally {
   await browser.close();

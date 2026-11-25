@@ -53,3 +53,25 @@ test('shape, hashing and LRU', () => {
   assert.equal(lru.get('a'), 1);
   assert.equal(lru.size, 2);
 });
+
+test('run positions and furigana selection', () => {
+  assert.deepEqual(g.runsWithPositions([0, 3, 3, 0, 2, 0]), [{ start: 1, len: 2 }, { start: 4, len: 1 }]);
+  // main column 30 px, furigana 14 px right beside it, next main column, its furigana
+  const runs = [{ start: 0, len: 30 }, { start: 31, len: 14 }, { start: 60, len: 31 }, { start: 92, len: 14 }];
+  assert.deepEqual(g.rubyRuns(runs).map(r => r.start), [31, 92]);
+  // DPR 1: thin stray runs beside 15 px columns
+  assert.deepEqual(g.rubyRuns([{ start: 0, len: 15 }, { start: 16, len: 2 }, { start: 40, len: 15 }]).map(r => r.start), [16]);
+  // two ordinary columns, nothing removed; a far-away thin run is not furigana
+  assert.deepEqual(g.rubyRuns([{ start: 0, len: 30 }, { start: 40, len: 28 }]), []);
+  assert.deepEqual(g.rubyRuns([{ start: 0, len: 30 }, { start: 80, len: 10 }]), []);
+});
+
+test('eroding the light tone seals a 1-pixel gap in an outline', () => {
+  // 7x5 light field split by a dark wall at x=3 with a one-pixel gap at y=2
+  const w = 7, h = 5, mask = new Uint8Array(w * h).fill(1);
+  for (let y = 0; y < h; y++) if (y !== 2) mask[y * w + 3] = 0;
+  const out = g.erodeTone(mask, w, h, 1);
+  assert.equal(out[2 * w + 3], 0, 'gap closed');
+  assert.equal(out[2 * w + 1], 1, 'interior kept');
+  assert.equal(mask[2 * w + 3], 1, 'input untouched');
+});

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<title>Hard cases: furigana, broken outlines, cut-off bubbles</title>
+<style>
+  html, body { margin: 0; background: #1e1e1e; }
+  body { width: 1280px; height: 800px; overflow: hidden; position: relative; font-family: 'IPAGothic', sans-serif; }
+  .page { position: absolute; left: 300px; top: -60px; width: 680px; height: 960px; background: #f7f7f7; }
+  .bubble { position: absolute; background: #fff; border: 2px solid #111; border-radius: 50%; box-sizing: border-box;
+            display: flex; align-items: center; justify-content: center; }
+  .t { font-size: 18px; line-height: 1.5; color: #111; letter-spacing: 1px; white-space: nowrap; writing-mode: vertical-rl; text-orientation: upright; }
+  rt { font-size: 9px; }
+  .gap { position: absolute; background: #fff; }
+  .tone { position: absolute; background-image: radial-gradient(#666 1.1px, transparent 1.4px); background-size: 6px 6px; }
+</style>
+<div class="page">
+  <div class="tone" style="left:0;top:0;width:680px;height:960px"></div>
+  <!-- furigana beside the kanji, like the user's screenshots -->
+  <div class="bubble" data-gt="私の人生は始まっちゃったの" data-dir="v" style="left:500px;top:150px;width:150px;height:260px">
+    <div class="t"><ruby>私<rt>わたし</rt></ruby>の<ruby>人生<rt>じんせい</rt></ruby>は<br><ruby>始<rt>はじ</rt></ruby>まっちゃったの</div></div>
+  <!-- thin outline with 2 px gaps, on a pale page: the interior leaks into the background -->
+  <div class="bubble" data-gt="呆れちゃうよねぇ" data-dir="v" style="left:60px;top:430px;width:110px;height:230px;border-width:1px;border-color:#444">
+    <div class="t">呆れちゃう<br>よねぇ</div></div>
+  <div class="gap" style="left:110px;top:429px;width:2px;height:3px"></div>
+  <div class="gap" style="left:60px;top:540px;width:3px;height:2px"></div>
+  <!-- cut off by the top of the screen (text fully visible) -->
+  <div class="bubble" data-gt="どんな人生になったっていいもん" data-dir="v" style="left:300px;top:0px;width:150px;height:330px">
+    <div class="t" style="margin-top:70px">どんな人生に<br>なったっていいもん</div></div>
+  <!-- cut off by the bottom of the screen -->
+  <div class="bubble" data-gt="お兄ちゃんのせいで" data-dir="v" style="left:250px;top:620px;width:110px;height:300px">
+    <div class="t" style="margin-bottom:110px">お兄ちゃんの<br>せいで</div></div>
+</div>
+</html>

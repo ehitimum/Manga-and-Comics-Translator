@@ -6,10 +6,11 @@ From a source checkout, run `npm ci --ignore-scripts` and `npm run build`. Then 
 
 1. Open a Japanese manga page and click **Translate page** in the popup, or press **Alt+Shift+T**. English appears inside each bubble, fitted to its shape, and stays aligned while you scroll, zoom or resize.
 2. Use **Show original** (popup, floating button or **Alt+Shift+O**) to compare.
-3. Turn on **Auto-translate on scroll** (or **Alt+Shift+A**) for long strips. New bubbles are translated when scrolling stops, and images below the screen are read ahead, so they are usually ready when you get there. Already-translated bubbles come from a cache.
-4. **Always translate on this site** in the popup asks for that site's permission once. After that, every chapter on the site translates on load.
-5. If a site hides or deletes the overlay, use **Snapshot view** in the popup. It opens the last capture with its translation in a separate tab.
-6. Optional: **Settings → Accurate mode** downloads a comic text detector and manga-ocr (about 128 MB, Apache-2.0, checksum-verified). manga-ocr re-reads unclear bubbles, and the detector finds grey bubbles, narration and text drawn on the art. It costs about 0.3 s per screen plus 0.3–0.4 s per extra bubble on a 4-core CPU.
+3. Translation works in two steps. First, the page's own images are translated in full: the visible page and the next 5 below, so pages are usually ready before you reach them. Then a screenshot of the screen covers anything else. If a site serves its images from another server, the popup shows **Allow whole-page translation**; until you allow it, only the visible screen is translated.
+4. Turn on **Auto-translate on scroll** (or **Alt+Shift+A**) for long strips. New bubbles are translated when scrolling stops, and images below the screen are read ahead, so they are usually ready when you get there. Already-translated bubbles come from a cache.
+5. **Always translate on this site** in the popup asks for that site's permission once. After that, every chapter on the site translates on load.
+6. If a site hides or deletes the overlay, use **Snapshot view** in the popup. It opens the last capture with its translation in a separate tab.
+7. Optional: **Settings → Accurate mode** downloads a comic text detector and manga-ocr (about 128 MB, Apache-2.0, checksum-verified). manga-ocr re-reads unclear bubbles, and the detector finds grey bubbles, narration and text drawn on the art. It costs about 0.3 s per screen plus 0.3–0.4 s per extra bubble on a 4-core CPU.
 
 **How it works.**
 - Manga images are read directly from the page when the site allows it; otherwise the visible tab is captured.

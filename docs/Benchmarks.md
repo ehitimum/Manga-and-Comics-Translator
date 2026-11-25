@@ -6,10 +6,21 @@ Run `npm run build` first.
 | --- | --- |
 | `npm test` | Node unit tests: geometry, OCR text assembly, translation batching, ZIP/CTC decoding, text fitting. |
 | `npm run bench` | Engine benchmark on the synthetic manga page (`tests/e2e/fixtures/manga-page.html`) at DPR 2 and 1. |
-| `npm run test:e2e` | Benchmark plus the extension suites: hostile pages, capture and source-image pipelines, cache, auto mode, snapshot view, always-translate sites, extension pages. |
+| `npm run test:e2e` | Benchmark plus the extension suites: hostile pages, capture and source-image pipelines, 5-page read-ahead, partial-bubble replacement, blocked image hosts, cache, auto mode, snapshot view, always-translate sites, extension pages. |
 | `node tests/e2e/run.mjs --accurate` | Also downloads Accurate mode (128 MB from Hugging Face) and checks it, including text outside bubbles. |
 
 The suites load a copy of `extension/` with `<all_urls>` added, because automation cannot grant `activeTab`. Pinned tessdata is downloaded to `tests/.cache` and checked against the SHA-256 in `extension/reader/models.js`. The `debugEchoTranslator` setting makes the engine "translate" to `[EN] <Japanese>` so the pipeline can be tested without a translation model.
+
+## Hard cases (`tests/e2e/fixtures/hard-page.html`)
+
+The page has four bubbles built from cases reported on real sites: vertical text with furigana, a thin broken outline on a pale page, and bubbles cut off by the top and bottom of the screen.
+
+| Version | DPR 2 | DPR 1 |
+| --- | --- | --- |
+| 0.5.0-beta.2 | 0 of 4 | 1 of 4 |
+| 0.5.0-beta.3 | 4 of 4 | 4 of 4 |
+
+The fixes: the light and dark masks are eroded by one pixel, which seals outline gaps and keeps crops inside the outline; bubble shape is judged on the filled outline; furigana columns are blanked before OCR; screen captures keep bubbles cut by one edge, flagged as partial, and replace them once fully visible.
 
 ## Hostile pages
 
