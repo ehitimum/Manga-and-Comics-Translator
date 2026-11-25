@@ -64,7 +64,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // ------------------------------------------------------------ engine
 
-async function ensureEngine() {
+// One creation at a time; callers that arrive meanwhile wait for the same document.
+let creatingEngine = null;
+function ensureEngine() {
+  creatingEngine ??= createEngine().finally(() => { creatingEngine = null; });
+  return creatingEngine;
+}
+async function createEngine() {
   const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'], documentUrls: [chrome.runtime.getURL(ENGINE_URL)] });
   if (!contexts.length) {
     try {
@@ -80,9 +86,19 @@ async function engineSettings() {
   return { accurateMode, debugEchoTranslator };
 }
 
+// A new offscreen document needs a moment before its module registers a listener: retry until it answers.
 async function forwardToEngine(message) {
   await ensureEngine();
-  return chrome.runtime.sendMessage({ ...message, settings: await engineSettings() });
+  const full = { ...message, settings: await engineSettings() };
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const response = await chrome.runtime.sendMessage(full);
+      if (response !== undefined || attempt >= 30) return response;
+    } catch (error) {
+      if (!/Receiving end does not exist/i.test(error.message) || attempt >= 30) throw error;
+    }
+    await sleep(100);
+  }
 }
 
 async function warmEngine() {

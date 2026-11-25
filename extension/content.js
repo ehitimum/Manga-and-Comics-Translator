@@ -140,11 +140,16 @@
 
   function addItem(anchor, rel, result, key) {
     if (key && items.some(i => i.key === key)) return;
-    // Drop near-duplicates on the same anchor (re-translation of an already covered bubble).
-    if (items.some(i => i.anchor === anchor && overlapRel(i.rel, rel) > 0.5)) return;
+    // Near-duplicates on the same anchor: keep the existing overlay, unless it came from a bubble cut off by
+    // the screen edge and this result is the complete bubble.
+    const overlapping = items.filter(i => i.anchor === anchor && overlapRel(i.rel, rel) > 0.5);
+    if (overlapping.length) {
+      if (result.partial || overlapping.some(i => !i.partial)) return;
+      for (const i of overlapping) { i.el.remove(); items.splice(items.indexOf(i), 1); }
+    }
     const el = R.createOverlay(result);
     layer.appendChild(el);
-    items.push({ el, anchor, rel, key, w: 0, h: 0 });
+    items.push({ el, anchor, rel, key, w: 0, h: 0, partial: !!result.partial });
     resizeObserver.observe(anchor);
     raise();
     updateCompare();
@@ -219,14 +224,24 @@
     addItem(img, { x: r.x / img.naturalWidth, y: r.y / img.naturalHeight, w: r.w / img.naturalWidth, h: r.h / img.naturalHeight }, r, `i:${img.dataset.mtpKey}:${r.id}`);
   }
 
-  // ------------------------------------------------------------ source images (read-ahead)
-  const imageState = new WeakMap(), imageByKey = new Map(), failedHosts = new Set();
-  let sourceUnsupported = false;
+  // ------------------------------------------------------------ step 1: whole page images
+  // The page's own images are translated in full (no cut-off bubbles, no capture limits), the visible ones
+  // first and then the next few below, so pages are usually ready before you scroll to them.
+  const AHEAD = 5;
+  const imageState = new WeakMap(), imageByKey = new Map(), failedHosts = new Set(), blockedHosts = new Set();
+  const watchedLoads = new WeakSet();
+  let sourceUnsupported = false, blockedNotified = false, active = false, sourceImages = 0, lastSourceError = null;
+  const imageHost = img => { try { return new URL(img.currentSrc || img.src).host; } catch { return ''; } };
   function isMangaImage(img) {
     if (!img.complete || img.naturalWidth < 400 || img.naturalHeight < 400) return false;
     const r = img.getBoundingClientRect();
     if (r.width < 200 || r.height < 200) return false;
     try { const u = new URL(img.currentSrc || img.src); return /^https?:$/.test(u.protocol) && !failedHosts.has(u.host); } catch { return false; }
+  }
+  function notifyBlocked() {
+    if (blockedNotified || !isTop) return;
+    blockedNotified = true;
+    showToast('Whole-page translation needs access to this site’s images. Open the extension popup and click “Allow whole-page translation”. Until then, only the visible screen is translated.', 'info', 9000);
   }
   function translateImage(img, priority = 0) {
     if (sourceUnsupported) return Promise.resolve(false);
@@ -235,36 +250,47 @@
     const key = img.dataset.mtpKey || `${Date.now().toString(36)}${++imageSeq}`;
     img.dataset.mtpKey = key;
     imageByKey.set(key, img);
-    const url = img.currentSrc || img.src;
+    const url = img.currentSrc || img.src, host = imageHost(img);
     const promise = chrome.runtime.sendMessage({ action: 'translate_source_image', url, width: img.naturalWidth, height: img.naturalHeight, imageKey: key, priority })
       .then(res => {
         if (!res || res.error) {
+          lastSourceError = res?.error || 'no response';
           if (res?.error === 'unsupported') sourceUnsupported = true;
-          else try { failedHosts.add(new URL(url).host); } catch {}
+          else {
+            failedHosts.add(host);
+            if (res?.error === 'blocked') { blockedHosts.add(host); notifyBlocked(); }
+          }
           imageState.delete(img);
           return false;
         }
+        sourceImages++;
         for (const r of res.results || []) drawImageResult(img, r);
         return true;
       })
-      .catch(() => { imageState.delete(img); return false; });
+      .catch(e => { lastSourceError = e.message; imageState.delete(img); return false; });
     imageState.set(img, promise);
     return promise;
   }
-  const readAhead = new IntersectionObserver(entries => {
-    if (!(autoMode || siteAuto)) return;
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      const img = e.target, priority = Math.max(0, e.boundingClientRect.top);
-      // Lazy-loaded images are often still empty when they come near the screen.
-      if (!img.complete) img.addEventListener('load', () => { if (isMangaImage(img)) translateImage(img, priority); }, { once: true });
-      else if (isMangaImage(img)) translateImage(img, priority);
-    }
-  }, { rootMargin: '0px 0px 150% 0px' });
-  const observed = new WeakSet();
-  function observeImages() {
-    for (const img of document.images) if (!observed.has(img)) { observed.add(img); readAhead.observe(img); }
+  // Visible images plus the next AHEAD below them, in reading order.
+  function chapterWindow() {
+    const list = [...document.images].map(img => ({ img, r: img.getBoundingClientRect() }))
+      .filter(x => x.r.width >= 200 && x.r.height >= 200).sort((a, b) => (a.r.top - b.r.top) || (b.r.left - a.r.left));
+    const first = list.findIndex(x => x.r.bottom > 0);
+    if (first < 0) return [];
+    let lastVisible = first;
+    while (lastVisible + 1 < list.length && list[lastVisible + 1].r.top < innerHeight) lastVisible++;
+    return list.slice(first, lastVisible + 1 + AHEAD);
   }
+  function prefetch() {
+    if (!active || sourceUnsupported || !isTop) return;
+    for (const { img, r } of chapterWindow()) {
+      if (img.complete && img.naturalWidth) { if (isMangaImage(img)) translateImage(img, Math.max(0, r.top)); }
+      // Lazy-loaded images are often still empty when they come near the screen.
+      else if (!watchedLoads.has(img)) { watchedLoads.add(img); img.addEventListener('load', () => prefetch(), { once: true }); }
+    }
+  }
+  let prefetchTimer;
+  const schedulePrefetch = (delay = 250) => { clearTimeout(prefetchTimer); prefetchTimer = setTimeout(prefetch, delay); };
 
   // ------------------------------------------------------------ translation
   const toImagePx = (r, dpr) => ({ x: r.left * dpr, y: r.top * dpr, w: r.width * dpr, h: r.height * dpr });
@@ -287,19 +313,27 @@
         showToast(`Translated ${results.length} text regions.`);
         return;
       }
-      // 1. Visible manga images through the source-image path (exact pixels, cached, no capture).
+      active = true;
+      // Step 1: visible manga images in full through the source-image path; the next pages follow in the background.
       const visible = [...document.images].filter(img => { const r = img.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight && isMangaImage(img); });
-      const handled = (await Promise.all(visible.map(img => translateImage(img, 0).then(ok => (ok ? img : null))))).filter(Boolean);
-      // 2. Everything else through a viewport capture, skipping translated areas and our own controls.
+      const handledPromise = Promise.all(visible.map(img => translateImage(img, 0).then(ok => (ok ? img : null))));
+      prefetch();
+      const handled = (await handledPromise).filter(Boolean);
+      // Step 2: everything else from a screen capture — canvases, blocked images, text outside images —
+      // skipping translated areas and our own controls. Partial overlays stay readable, so they are re-read.
       const zones = [...handled.map(img => img.getBoundingClientRect()),
-        ...items.filter(i => !i.el.hidden).map(i => i.el.getBoundingClientRect()),
+        ...items.filter(i => !i.el.hidden && !i.partial).map(i => i.el.getBoundingClientRect()),
         ...(btn ? [btn.parentElement.getBoundingClientRect()] : [])];
       const coveredByImages = handled.reduce((s, img) => { const r = img.getBoundingClientRect(); return s + Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0)) * Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0)); }, 0);
       if (!handled.length || coveredByImages < innerWidth * innerHeight * 0.5) {
-        // Let removed overlays leave the screen before Chrome grabs the frame.
+        // Partial overlays cover bubbles that must be read again in full: hide them for the capture.
+        const partials = items.filter(i => i.partial && !i.el.hidden);
+        for (const i of partials) i.el.style.visibility = 'hidden';
+        // Let removed or hidden overlays leave the screen before Chrome grabs the frame.
         await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
         req.anchors = snapshotAnchors();
-        const res = await chrome.runtime.sendMessage({ action: 'capture_and_translate', requestId: req.requestId, dpr, exclude: zones.map(z => toImagePx(z, dpr)) });
+        const res = await chrome.runtime.sendMessage({ action: 'capture_and_translate', requestId: req.requestId, dpr, exclude: zones.map(z => toImagePx(z, dpr)) })
+          .finally(() => { for (const i of partials) i.el.style.visibility = ''; });
         if (res?.error === 'busy') { pendingAuto = true; return; }
         if (!res || res.error) throw new Error(res?.error || 'No response from the extension.');
         lastRun = { captured: res.results?.length || 0, excluded: zones.length };
@@ -326,8 +360,8 @@
     clearTimeout(autoTimer);
     autoTimer = setTimeout(() => translate({ incremental: true }), delay);
   }
-  document.addEventListener('scroll', () => { schedule(); scheduleAuto(); }, { capture: true, passive: true });
-  document.addEventListener('scrollend', () => scheduleAuto(60), { capture: true, passive: true });
+  document.addEventListener('scroll', () => { schedule(); scheduleAuto(); schedulePrefetch(400); }, { capture: true, passive: true });
+  document.addEventListener('scrollend', () => { scheduleAuto(60); schedulePrefetch(0); }, { capture: true, passive: true });
 
   // ------------------------------------------------------------ messages + settings
   chrome.runtime.onMessage.addListener((request, _sender, respond) => {
@@ -350,8 +384,19 @@
       case 'clear_overlays': clearOverlays(); respond?.({ ok: true }); return;
       case 'toggle_original': setOriginal(!showOriginal); respond?.({ ok: true, showOriginal }); return;
       case 'auto_changed': loadSettings(); respond?.({ ok: true }); return;
+      case 'page_info': {
+        const hosts = [...new Set([...document.images].filter(img => img.naturalWidth >= 400 && img.naturalHeight >= 400).map(imageHost).filter(Boolean))];
+        respond({ ok: true, active, sourceImages, sourceUnsupported, lastSourceError, blockedHosts: [...blockedHosts], imageHosts: hosts, overlays: items.length });
+        return;
+      }
+      case 'access_granted':
+        for (const h of blockedHosts) failedHosts.delete(h);
+        blockedHosts.clear(); blockedNotified = false;
+        translate({ incremental: true });
+        respond?.({ ok: true });
+        return;
       case 'overlay_state': respond({ ok: true, items: items.length, showOriginal, busy: busy || pendingManual, lastRun,
-        debug: request.debug ? items.map(i => ({ tag: i.anchor.localName, cls: i.anchor.className?.baseVal ?? i.anchor.className, rel: i.rel, box: i.el.style.cssText })) : undefined }); return;
+        debug: request.debug ? items.map(i => ({ text: i.el.textContent.slice(0, 18), partial: i.partial, anchorTop: Math.round(i.anchor.getBoundingClientRect().top + scrollY), tag: i.anchor.localName, cls: i.anchor.className?.baseVal ?? i.anchor.className, rel: i.rel, box: i.el.style.cssText })) : undefined }); return;
     }
   });
 
@@ -360,12 +405,15 @@
     const wasAuto = autoMode || siteAuto;
     autoMode = !!a;
     siteAuto = autoSites.includes(location.origin);
-    if (autoMode || siteAuto) observeImages();
+    if (autoMode || siteAuto) { active = true; schedulePrefetch(); }
     if (!wasAuto && (autoMode || siteAuto)) scheduleAuto(800);
   }
   chrome.storage.onChanged.addListener(changes => { if (changes.autoMode || changes.autoSites) loadSettings(); });
   loadSettings();
-  if (isTop) new MutationObserver(() => { if (autoMode || siteAuto) observeImages(); }).observe(document.documentElement, { childList: true, subtree: true });
+  // Readers that add pages as you go: look for new images once things settle.
+  if (isTop) new MutationObserver(() => { if (active) schedulePrefetch(500); }).observe(document.documentElement, { childList: true, subtree: true });
+  // Start the OCR workers and translator now, so the first click does not wait for them.
+  if (isTop && !sampleMode) chrome.runtime.sendMessage({ action: 'engine_warm' }).catch(() => {});
 
   fetch(chrome.runtime.getURL('build-info.json')).then(r => r.json()).then(info => {
     if (isTop) console.log(`%c[MangaTranslator] ready · v${info.version} · build ${info.buildId}`, 'color:#2563eb;font-weight:bold');

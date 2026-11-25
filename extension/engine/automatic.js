@@ -5,7 +5,7 @@ import { coverage, isExcluded, LRU, readingOrder } from './geometry.js';
 import { getTranslator, translationQueue } from '../providers/pageTranslation.js';
 import * as accurate from './accurate.js';
 
-export const ENGINE_VERSION = 'e3';
+export const ENGINE_VERSION = 'e4';
 const pool = new OcrPool();
 const crops = new LRU(500);            // crop hash -> { text, confidence } (OCR result)
 const translations = new LRU(1000);    // Japanese text -> English
@@ -41,8 +41,9 @@ async function translateCapture(req) {
   const source = await createImageBitmap(await (await fetch(req.image)).blob());
   try {
     const alive = () => latest.get(req.tabId) === req.requestId;
+    // A capture may cut bubbles at the screen edge; keep them (flagged partial) rather than miss them.
     return await runPipeline(source, req, alive, result =>
-      send({ action: 'page_translation_result', tabId: req.tabId, requestId: req.requestId, result }));
+      send({ action: 'page_translation_result', tabId: req.tabId, requestId: req.requestId, result }), { allowEdges: true });
   } finally { source.close(); }
 }
 
@@ -69,7 +70,13 @@ async function translateImage(req) {
   const cacheKey = [req.url, req.width, req.height, ENGINE_VERSION, req.settings?.accurateMode ? 'a' : 'f', req.settings?.debugEchoTranslator ? 't' : ''].join('|');
   const hit = await idb('get', cacheKey).catch(() => null);
   if (hit) { stats.imageCacheHits++; return { results: hit, cached: true }; }
-  const response = await fetch(req.url, { credentials: 'include', signal: AbortSignal.timeout(30000) });
+  let response;
+  try {
+    response = await fetch(req.url, { credentials: 'include', signal: AbortSignal.timeout(30000) });
+  } catch (error) {
+    // A network-level failure here almost always means CORS: the extension has no access to the image host.
+    throw Error(error?.name === 'TimeoutError' ? 'timeout' : 'blocked');
+  }
   if (!response.ok) throw Error('Image fetch failed: ' + response.status);
   const blob = await response.blob();
   if (!blob.type.startsWith('image/') && blob.type !== '') throw Error('Not an image');
@@ -85,12 +92,12 @@ async function translateImage(req) {
 }
 
 // ---- the pipeline: detect → masked crops → OCR (pool, cached) → streamed batched translation
-async function runPipeline(source, req, alive, emit) {
+async function runPipeline(source, req, alive, emit, { allowEdges = false } = {}) {
   const settings = req.settings || {};
   const status = message => send({ action: 'page_translation_status', tabId: req.tabId, message });
   status('Finding speech bubbles…');
   const exclude = req.exclude || [];
-  const prepared = [], candidates = detectBubbles(source);
+  const prepared = [], candidates = detectBubbles(source, { allowEdges });
   for (const candidate of candidates) {
     if (isExcluded(candidate, exclude)) continue;
     const crop = bubbleCrop(source, candidate);

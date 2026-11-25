@@ -98,3 +98,41 @@ export class LRU {
   get size() { return this.map.size; }
 }
 
+
+// Runs above `min` in a projection profile, with positions: [{ start, len }].
+export function runsWithPositions(profile, min = 1) {
+  const runs = [];
+  let start = -1;
+  for (let i = 0; i <= profile.length; i++) {
+    const on = i < profile.length && profile[i] >= min;
+    if (on && start < 0) start = i;
+    if (!on && start >= 0) { runs.push({ start, len: i - start }); start = -1; }
+  }
+  return runs;
+}
+
+// Furigana (reading aids) form thin columns/lines right beside the main text. Main-text thickness is taken
+// from the thickest runs (furigana can be as many runs as the text itself). Returns the runs to blank out.
+export function rubyRuns(runs, ratio = 0.6) {
+  if (runs.length < 2) return [];
+  const widest = Math.max(...runs.map(r => r.len));
+  const main = median(runs.map(r => r.len).filter(l => l >= widest * 0.75));
+  if (main < 6) return [];
+  const isMain = r => r.len >= main * ratio;
+  return runs.filter((r, i) => !isMain(r) && [runs[i - 1], runs[i + 1]].some(n => n && isMain(n) &&
+    Math.min(Math.abs(n.start + n.len - r.start), Math.abs(r.start + r.len - n.start)) <= main * 0.5));
+}
+
+// Light pixels survive only if all 8 neighbours are light too. Seals 1–2 px gaps in thin bubble outlines,
+// so a bubble's inside no longer leaks into a pale page, and dissolves screentone lattices.
+export function erodeTone(mask, width, height, tone = 1) {
+  const out = mask.slice();
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const i = y * width + x;
+    if (mask[i] !== tone) continue;
+    if (x === 0 || y === 0 || x === width - 1 || y === height - 1) continue;
+    if (mask[i - 1] !== tone || mask[i + 1] !== tone || mask[i - width] !== tone || mask[i + width] !== tone ||
+        mask[i - width - 1] !== tone || mask[i - width + 1] !== tone || mask[i + width - 1] !== tone || mask[i + width + 1] !== tone) out[i] = 0;
+  }
+  return out;
+}

@@ -83,6 +83,9 @@
         color: var(--text);
       }
       button.secondary:hover { background: var(--panel); }
+      .access { background: #3b2f0b; border: 1px solid var(--warn); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: 12px; }
+      .access p { margin: 0 0 8px; }
+      .access button { width: 100%; }
       label.toggle {
         display: flex;
         align-items: center;
@@ -139,6 +142,10 @@
 
       <div class="row">
         <button id="translate-btn">Translate page</button>
+      </div>
+      <div class="access" id="access" hidden>
+        <p id="access-text">This site's images are on another server, so only the visible screen is translated.</p>
+        <button id="access-btn">Allow whole-page translation</button>
       </div>
       <div class="row">
         <button id="original-btn" class="secondary">Show original</button>

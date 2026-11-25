@@ -13,6 +13,29 @@ function setStatus(state, text) { statusEl.dataset.state = state; statusText.tex
 
 const activeTab = async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
 const translatable = tab => /^https?:/.test(tab?.url || '');
+const hostPatterns = hosts => [...new Set(hosts.map(h => `*://${h.replace(/:\d+$/, "")}/*`))]; // any port
+
+// What the page's content script knows: is whole-page translation running, and which image hosts are blocked.
+async function pageInfo(tab) {
+  if (!tab?.id || !translatable(tab)) return null;
+  return chrome.tabs.sendMessage(tab.id, { action: 'page_info' }, { frameId: 0 }).catch(() => null);
+}
+
+async function showAccess(tab) {
+  const info = await pageInfo(tab);
+  const access = $('access');
+  if (!info?.blockedHosts?.length) { access.hidden = true; return; }
+  access.hidden = false;
+  $('access-text').textContent = `Images come from ${info.blockedHosts.join(', ')}, so only the visible screen is translated and bubbles at the screen edge can be missed.`;
+  $('access-btn').onclick = async () => {
+    // Inside this click: permission prompts need a user gesture.
+    const granted = await chrome.permissions.request({ origins: hostPatterns(info.blockedHosts) }).catch(() => false);
+    if (!granted) return;
+    await chrome.tabs.sendMessage(tab.id, { action: 'access_granted' }, { frameId: 0 }).catch(() => {});
+    access.hidden = true;
+    setStatus('ok', 'Whole-page translation on');
+  };
+}
 
 async function loadBuildInfo() {
   try {
@@ -31,6 +54,7 @@ async function loadSettingsAndProbe() {
     const origin = new URL(tab.url).origin;
     $('site-name').textContent = new URL(tab.url).host;
     siteToggle.checked = autoSites.includes(origin);
+    showAccess(tab);
   } else siteToggle.disabled = true;
 
   if (provider === 'browser') {
@@ -114,12 +138,14 @@ siteToggle.addEventListener('change', async () => {
   try {
     if (siteToggle.checked) {
       // Must run inside this click: permission prompts need a user gesture.
-      const granted = await chrome.permissions.request({ origins: [pattern] });
+      // Include the servers the page's images come from, so whole pages can be read, not just the screen.
+      const info = await pageInfo(tab);
+      const granted = await chrome.permissions.request({ origins: [pattern, ...hostPatterns((info?.imageHosts || []).filter(h => h !== url.host))] });
       if (!granted) { siteToggle.checked = false; return; }
     }
     const res = await chrome.runtime.sendMessage({ action: 'register_site', origin: url.origin, enable: siteToggle.checked });
     if (res?.error) throw new Error(res.error);
-    if (siteToggle.checked) await sendToTab({ action: 'auto_changed' });
+    if (siteToggle.checked) { await sendToTab({ action: 'auto_changed' }); await sendToTab({ action: 'access_granted' }); $('access').hidden = true; }
     hint.textContent = siteToggle.checked ? `Pages on ${url.host} now translate automatically.` : `Stopped translating ${url.host} automatically.`;
   } catch (err) {
     siteToggle.checked = !siteToggle.checked;
